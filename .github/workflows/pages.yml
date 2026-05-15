@@ -4,9 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    # Monday 04:00 in Asia/Shanghai.
+    - cron: "0 20 * * 0"
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -22,6 +25,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        with:
+          node-version: 22
+      - name: Refresh weekly house price data
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: node scripts/update-weekly-data.js --generate
+      - name: Commit weekly data refresh
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/gba_house_prices.json index.html gba_house_price_map_2026_04.html gba_house_price_map_2026_04.svg
+          if ! git diff --cached --quiet; then
+            git commit -m "Update weekly house price data"
+            git push
+          fi
+      - name: Remove temporary boundary downloads
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: rm -f datav_*.json
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

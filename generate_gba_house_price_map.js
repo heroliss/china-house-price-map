@@ -34,7 +34,7 @@ const cityCenters = {
   澳门: [113.5439, 22.1987],
 };
 
-const mainlandData = {
+let mainlandData = {
   "广州|天河区": [62053, "+4.30%"], "广州|越秀区": [55882, "+4.29%"], "广州|海珠区": [41259, "+4.83%"],
   "广州|荔湾区": [35713, "-1.67%"], "广州|白云区": [32002, "-1.87%"], "广州|黄埔区": [31264, "+9.78%"],
   "广州|番禺区": [29220, "-1.19%"], "广州|南沙区": [18205, "+0.40%"], "广州|花都区": [15870, "-0.95%"],
@@ -65,7 +65,7 @@ const mainlandData = {
   "中山|横栏镇": [6797, "-2.44%"], "中山|板芙镇": [6063, "+1.03%"], "中山|三角镇": [5747, "-1.66%"],
 };
 
-const townPoints = [
+const townPointDefs = [
   ["东莞", "南城区", 113.735, 23.008], ["东莞", "东城区", 113.784, 23.032], ["东莞", "万江区", 113.704, 23.044],
   ["东莞", "大朗镇", 113.944, 22.944], ["东莞", "塘厦镇", 114.079, 22.812], ["东莞", "寮步镇", 113.884, 23.003],
   ["东莞", "厚街镇", 113.673, 22.940], ["东莞", "大岭山镇", 113.845, 22.906], ["东莞", "长安镇", 113.803, 22.817],
@@ -78,29 +78,79 @@ const townPoints = [
   ["中山", "南区", 113.367, 22.486], ["中山", "沙溪镇", 113.332, 22.522], ["中山", "三乡镇", 113.433, 22.353],
   ["中山", "东凤镇", 113.260, 22.690], ["中山", "港口镇", 113.393, 22.590], ["中山", "东升镇", 113.300, 22.625],
   ["中山", "横栏镇", 113.265, 22.535], ["中山", "板芙镇", 113.335, 22.407], ["中山", "三角镇", 113.423, 22.680],
-].map(([city, name, lon, lat], index) => {
-  const data = mainlandData[`${city}|${name}`];
-  return { id: `p${index}`, city, name, lon, lat, price: data?.[0] || null, mom: data?.[1] || "" };
-});
+];
 
-const cityStats = [
+let cityStats = [
   ["深圳", 70736, "+3.55%"], ["广州", 38612, "+6.04%"], ["珠海", 20138, "+3.50%"],
   ["东莞", 19421, "-2.49%"], ["佛山", 12828, "+0.71%"], ["中山", 8479, "-1.77%"],
   ["惠州", 8297, "+4.12%"], ["江门", 6984, "+0.94%"], ["肇庆", 6799, "+2.35%"],
 ];
 
-const hkStats = [
+let hkStats = [
   ["港岛", "159.72", "+3.03%", "1,359宗"],
   ["九龙", "154.74", "+1.80%", "3,710宗"],
   ["新界东", "171.06", "+1.11%", "1,187宗"],
   ["新界西", "140.35", "+0.62%", "1,246宗"],
 ];
 
-const macauStats = [
+let macauStats = [
   ["住宅楼价指数", "188.9", "按季 -1.5%"],
   ["现货住宅指数", "201.2", "按季 -1.7%"],
   ["住宅楼花指数", "240.3", "按季 +0.6%"],
 ];
+
+function formatBeijingTime(value) {
+  const date = value ? new Date(value) : new Date();
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} 北京时间`;
+}
+
+function loadWeeklyData() {
+  const metadata = {
+    mainlandPeriod: "2026年4月挂牌",
+    fetchedAt: null,
+    hkPeriod: "2026/05/08公开最新",
+    macauPeriod: "2026年第一季",
+    source: "内置静态数据",
+  };
+  const dataPath = path.join(__dirname, "data", "gba_house_prices.json");
+  if (!fs.existsSync(dataPath)) return metadata;
+  try {
+    const weekly = JSON.parse(fs.readFileSync(dataPath, "utf8"));
+    if (weekly.mainlandData) mainlandData = { ...mainlandData, ...weekly.mainlandData };
+    if (Array.isArray(weekly.cityStats) && weekly.cityStats.length) cityStats = weekly.cityStats;
+    if (Array.isArray(weekly.hkStats) && weekly.hkStats.length) hkStats = weekly.hkStats;
+    if (Array.isArray(weekly.macauStats) && weekly.macauStats.length) macauStats = weekly.macauStats;
+    return { ...metadata, ...weekly.metadata, fetchedAt: weekly.fetchedAt || weekly.updatedAt || metadata.fetchedAt };
+  } catch (error) {
+    console.warn(`Could not load weekly data override: ${error.message}`);
+    return metadata;
+  }
+}
+
+const dataMetadata = loadWeeklyData();
+dataMetadata.generatedAt = new Date().toISOString();
+const mainlandPeriodText = dataMetadata.mainlandPeriod || "2026年4月挂牌";
+const fetchedAtText = dataMetadata.fetchedAt ? formatBeijingTime(dataMetadata.fetchedAt) : "手动整理";
+const generatedAtText = formatBeijingTime(dataMetadata.generatedAt);
+const hkPeriodText = dataMetadata.hkPeriod || "公开最新";
+const macauPeriodText = dataMetadata.macauPeriod || "公开最新";
+
+const townPoints = townPointDefs.map(([city, name, lon, lat], index) => {
+  const data = mainlandData[`${city}|${name}`];
+  return { id: `p${index}`, city, name, lon, lat, price: data?.[0] || null, mom: data?.[1] || "" };
+});
 
 const W = 1800;
 const H = 1320;
@@ -399,11 +449,12 @@ const topDistricts = Object.entries(mainlandData)
   })
   .sort((a, b) => b.price - a.price)
   .slice(0, 12);
+const maxCityPrice = Math.max(...cityStats.map(([, price]) => price), 1);
 
 const sourceNotes = [
-  "内地9市：禧泰数据/中国房价行情，住宅挂牌均价，2026年4月。",
-  "香港：中原地产 Centadata，分区领先指数与4月成交，2026/05/08更新。",
-  "澳门：澳门统计暨普查局，2026年第一季住宅楼价指数，2026/05/08发布。",
+  `内地9市：禧泰数据/中国房价行情，住宅挂牌均价，${mainlandPeriodText}；最近抓取 ${fetchedAtText}。`,
+  `香港：中原地产 Centadata，分区领先指数与成交数据，${hkPeriodText}。`,
+  `澳门：澳门统计暨普查局住宅楼价指数，${macauPeriodText}。`,
   "底图：阿里云 DataV.GeoAtlas 行政区划边界。港澳因口径不同不纳入元/㎡色阶。"
 ];
 
@@ -430,7 +481,7 @@ let svg = `<?xml version="1.0" encoding="UTF-8"?>
 <path d="M0 1040 C330 980 520 1110 860 1040 S1390 910 1800 1020 L1800 1320 L0 1320Z" fill="#e8f1ec" opacity=".78"/>
 <text x="64" y="82" font-size="44" font-weight="900">粤港澳大湾区房价地图</text>
 <text x="64" y="122" class="small">9+2 城市，区县/镇街可得数据；主体色阶为内地住宅挂牌均价，单位：元/㎡</text>
-<text x="64" y="154" class="tiny">数据更新：内地 2026年4月；香港/澳门 2026年5月公开最新。生成日期：2026-05-15</text>
+<text x="64" y="154" class="tiny">数据更新：内地 ${esc(mainlandPeriodText)}；港澳 ${esc(hkPeriodText)} / ${esc(macauPeriodText)}。抓取：${esc(fetchedAtText)}；生成：${esc(generatedAtText)}</text>
 <g filter="url(#softShadow)"><rect x="38" y="178" width="1180" height="990" rx="20" fill="#ffffff" opacity=".84"/></g>
 <rect x="38" y="178" width="1180" height="990" rx="20" fill="#ffffff" opacity=".7" stroke="#dbe6e3"/>
 `;
@@ -471,7 +522,7 @@ svg += `<g transform="translate(1246 178)" filter="url(#softShadow)"><rect width
 <text x="34" y="88" class="tiny">内地9市，住宅挂牌均价</text>`;
 cityStats.forEach(([city, price, mom], i) => {
   const y = 128 + i * 52;
-  const w = 260 * price / 70736;
+  const w = 260 * price / maxCityPrice;
   svg += `<text x="34" y="${y}" font-size="21" font-weight="800">${city}</text>
   <rect x="116" y="${y - 18}" width="${w.toFixed(1)}" height="18" rx="5" fill="#2f89a6" opacity="${0.95 - i * 0.045}"/>
   <text x="398" y="${y}" font-size="20" font-weight="800" text-anchor="end">${fmt(price)}</text>
@@ -579,6 +630,7 @@ const interactiveHtml = `<!doctype html>
   header { position: absolute; z-index: 3; left: 26px; top: 22px; pointer-events: none; }
   h1 { margin: 0; font-size: 34px; letter-spacing: 0; }
   header p { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
+  header .updateLine { margin-top: 5px; font-size: 12px; color: #63767a; }
   .toolbar {
     position: absolute;
     right: 18px;
@@ -735,6 +787,7 @@ const interactiveHtml = `<!doctype html>
     <header>
       <h1>粤港澳大湾区房价地图</h1>
       <p>拖拽移动，滚轮缩放；悬停或点击区县查看详细数据</p>
+      <p class="updateLine">内地数据：${esc(mainlandPeriodText)}；最近抓取：${esc(fetchedAtText)}</p>
     </header>
     <div class="toolbar">
       <button id="zoomIn">放大</button>
@@ -776,7 +829,7 @@ const interactiveHtml = `<!doctype html>
   </section>
   <aside class="side">
     <h2>区县/城市数据</h2>
-    <p class="caption">内地为 2026年4月住宅挂牌均价；东莞/中山按镇街边界呈现，港澳为独立公开指数口径。</p>
+    <p class="caption">内地为 ${esc(mainlandPeriodText)}的住宅挂牌均价；最近抓取 ${esc(fetchedAtText)}。东莞/中山按镇街边界呈现，港澳为独立公开指数口径。</p>
     <input id="search" class="search" placeholder="搜索城市或区县，如 南山、广州、东莞">
     <div class="sortBar" aria-label="排序">
       <button data-sort="priceDesc" class="active">价格高</button>
@@ -792,8 +845,9 @@ const interactiveHtml = `<!doctype html>
     </div>
     <div id="rows" class="rows"></div>
     <div class="notes">
-      <b>香港：</b>中原 Centadata 分区领先指数，2026/05/08更新。<br>
-      <b>澳门：</b>统计暨普查局 2026年第一季住宅楼价指数。<br>
+      <b>更新：</b>GitHub Actions 每周一 04:00（北京时间）尝试拉取内地数据；页面生成 ${esc(generatedAtText)}。<br>
+      <b>香港：</b>中原 Centadata 分区领先指数，${esc(hkPeriodText)}。<br>
+      <b>澳门：</b>统计暨普查局住宅楼价指数，${esc(macauPeriodText)}。<br>
       <b>镇街：</b>东莞、中山没有县级区划，已按 OSM 镇街边界展示；无房价数据的镇街为浅灰。<br>
       <b>底图：</b>阿里云 DataV.GeoAtlas。港澳口径不同，未纳入元/㎡色阶。
     </div>

@@ -37,6 +37,7 @@
   header { position: absolute; z-index: 3; left: 26px; top: 22px; pointer-events: none; }
   h1 { margin: 0; font-size: 34px; letter-spacing: 0; }
   header p { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
+  header .updateLine { margin-top: 5px; font-size: 12px; color: #63767a; }
   .toolbar {
     position: absolute;
     right: 18px;
@@ -193,6 +194,7 @@
     <header>
       <h1>粤港澳大湾区房价地图</h1>
       <p>拖拽移动，滚轮缩放；悬停或点击区县查看详细数据</p>
+      <p class="updateLine">内地数据：2026年4月挂牌；最近抓取：2026-05-15 20:35 北京时间</p>
     </header>
     <div class="toolbar">
       <button id="zoomIn">放大</button>
@@ -441,7 +443,7 @@
   </section>
   <aside class="side">
     <h2>区县/城市数据</h2>
-    <p class="caption">内地为 2026年4月住宅挂牌均价；东莞/中山按镇街边界呈现，港澳为独立公开指数口径。</p>
+    <p class="caption">内地为 2026年4月挂牌的住宅挂牌均价；最近抓取 2026-05-15 20:35 北京时间。东莞/中山按镇街边界呈现，港澳为独立公开指数口径。</p>
     <input id="search" class="search" placeholder="搜索城市或区县，如 南山、广州、东莞">
     <div class="sortBar" aria-label="排序">
       <button data-sort="priceDesc" class="active">价格高</button>
@@ -457,8 +459,9 @@
     </div>
     <div id="rows" class="rows"></div>
     <div class="notes">
-      <b>香港：</b>中原 Centadata 分区领先指数，2026/05/08更新。<br>
-      <b>澳门：</b>统计暨普查局 2026年第一季住宅楼价指数。<br>
+      <b>更新：</b>GitHub Actions 每周一 04:00（北京时间）尝试拉取内地数据；页面生成 2026-05-15 20:35 北京时间。<br>
+      <b>香港：</b>中原 Centadata 分区领先指数，2026/05/08公开最新。<br>
+      <b>澳门：</b>统计暨普查局住宅楼价指数，2026年第一季。<br>
       <b>镇街：</b>东莞、中山没有县级区划，已按 OSM 镇街边界展示；无房价数据的镇街为浅灰。<br>
       <b>底图：</b>阿里云 DataV.GeoAtlas。港澳口径不同，未纳入元/㎡色阶。
     </div>
