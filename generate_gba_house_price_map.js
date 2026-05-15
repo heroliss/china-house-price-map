@@ -238,6 +238,19 @@ for (const f of features) {
 const scale = Math.min(mapBox.w / (maxX - minX), mapBox.h / (maxY - minY)) * 0.92;
 const ox = mapBox.x + (mapBox.w - (maxX - minX) * scale) / 2;
 const oy = mapBox.y + (mapBox.h + (maxY - minY) * scale) / 2;
+const projectedMapBounds = {
+  minX: ox,
+  minY: oy - (maxY - minY) * scale,
+  maxX: ox + (maxX - minX) * scale,
+  maxY: oy,
+};
+const mapViewPadding = 82;
+const mapViewBox = {
+  x: Math.max(0, projectedMapBounds.minX - mapViewPadding),
+  y: Math.max(0, projectedMapBounds.minY - mapViewPadding),
+  w: Math.min(W, projectedMapBounds.maxX + mapViewPadding) - Math.max(0, projectedMapBounds.minX - mapViewPadding),
+  h: Math.min(H, projectedMapBounds.maxY + mapViewPadding) - Math.max(0, projectedMapBounds.minY - mapViewPadding),
+};
 
 function project(c) {
   const [x, y] = mercator(c);
@@ -257,6 +270,103 @@ function geomToPath(geom) {
     }
   }
   return d;
+}
+
+function signedArea(points) {
+  let sum = 0;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    sum += (points[j][0] * points[i][1]) - (points[i][0] * points[j][1]);
+  }
+  return sum / 2;
+}
+
+function ringCentroid(points) {
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const cross = points[j][0] * points[i][1] - points[i][0] * points[j][1];
+    a += cross;
+    cx += (points[j][0] + points[i][0]) * cross;
+    cy += (points[j][1] + points[i][1]) * cross;
+  }
+  if (Math.abs(a) < 1e-9) {
+    const avg = points.reduce((acc, p) => [acc[0] + p[0], acc[1] + p[1]], [0, 0]);
+    return [avg[0] / points.length, avg[1] / points.length];
+  }
+  return [cx / (3 * a), cy / (3 * a)];
+}
+
+function pointInRing(point, ring) {
+  const [x, y] = point;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-9) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function distToSegment(point, a, b) {
+  const x = point[0], y = point[1];
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const len2 = dx * dx + dy * dy;
+  if (!len2) return Math.hypot(x - a[0], y - a[1]);
+  const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / len2));
+  return Math.hypot(x - (a[0] + t * dx), y - (a[1] + t * dy));
+}
+
+function minDistToRing(point, ring) {
+  let best = Infinity;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    best = Math.min(best, distToSegment(point, ring[j], ring[i]));
+  }
+  return best;
+}
+
+function bestLabelPoint(f) {
+  const geom = f.geometry;
+  const polygons = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
+  let bestRing = null;
+  let bestArea = 0;
+  for (const poly of polygons) {
+    if (!poly?.[0]) continue;
+    const ring = poly[0].map(project);
+    const area = Math.abs(signedArea(ring));
+    if (area > bestArea) {
+      bestArea = area;
+      bestRing = ring;
+    }
+  }
+  if (!bestRing) return centroidOfFeature(f);
+  const xs = bestRing.map(p => p[0]);
+  const ys = bestRing.map(p => p[1]);
+  const bbox = { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
+  const candidates = [ringCentroid(bestRing), [(bbox.minX + bbox.maxX) / 2, (bbox.minY + bbox.maxY) / 2]];
+  const steps = 10;
+  for (let ix = 1; ix < steps; ix++) {
+    for (let iy = 1; iy < steps; iy++) {
+      candidates.push([
+        bbox.minX + (bbox.maxX - bbox.minX) * ix / steps,
+        bbox.minY + (bbox.maxY - bbox.minY) * iy / steps,
+      ]);
+    }
+  }
+  let best = candidates.find(p => pointInRing(p, bestRing)) || candidates[0];
+  let bestScore = -Infinity;
+  for (const p of candidates) {
+    if (!pointInRing(p, bestRing)) continue;
+    const score = minDistToRing(p, bestRing);
+    if (score > bestScore) {
+      bestScore = score;
+      best = p;
+    }
+  }
+  return [Number(best[0].toFixed(2)), Number(best[1].toFixed(2)), {
+    w: Number((bbox.maxX - bbox.minX).toFixed(2)),
+    h: Number((bbox.maxY - bbox.minY).toFixed(2)),
+    score: Number(bestScore.toFixed(2)),
+  }];
 }
 
 function centroidOfFeature(f) {
@@ -409,16 +519,22 @@ const interactiveRegions = features.map((f, index) => {
   const key = `${f.properties.city}|${f.properties.name}`;
   const price = mainlandData[key]?.[0] || null;
   const mom = mainlandData[key]?.[1] || "";
-  const [cx, cy] = centroidOfFeature(f);
+  const [cx, cy, labelBox] = bestLabelPoint(f);
+  const cleanName = cleanAdminName(f.properties.name);
+  const minLabelScale = price
+    ? Math.max(2.0, Math.min(5.5, ((cleanName.length + 4) * 7) / Math.max(10, Math.min(labelBox.w, labelBox.h * 2))))
+    : 99;
   return {
     id: `r${index}`,
     city: f.properties.city,
     name: f.properties.name,
+    label: cleanName,
     price,
     mom,
     d: geomToPath(f.geometry),
     cx: Number(cx.toFixed(2)),
     cy: Number(cy.toFixed(2)),
+    labelMinScale: Number(minLabelScale.toFixed(2)),
     fill: colorFor(price, f.properties.city),
   };
 });
@@ -479,16 +595,19 @@ const interactiveHtml = `<!doctype html>
   }
   button { height: 36px; padding: 0 12px; cursor: pointer; }
   button:hover { border-color: #9fcac6; }
+  button.active { border-color: #2f89a6; background: #edf7f6; color: #1f6677; font-weight: 800; }
   svg { width: 100%; height: calc(100vh - 48px); display: block; cursor: grab; }
   svg.dragging { cursor: grabbing; }
   .region { stroke: #fff; stroke-width: 1.2; transition: opacity .15s, stroke-width .15s, filter .15s; }
   .region:hover, .region.active { stroke: #102a33; stroke-width: 2.8; filter: drop-shadow(0 5px 8px rgba(25,55,65,.25)); }
+  .mapTilesOn .region { fill-opacity: .62; stroke-opacity: .88; }
+  .mapTilesOn .cityLabel, .mapTilesOn .detailLabel { stroke: rgba(255,255,255,.95); }
   .townPoint { stroke: #fff; stroke-width: 2; cursor: pointer; filter: drop-shadow(0 3px 5px rgba(25,55,65,.25)); }
   .townPoint:hover, .townPoint.active { stroke: #102a33; stroke-width: 3; }
   .dimmed { opacity: .18; }
   .cityLabel { font-size: 16px; font-weight: 800; paint-order: stroke; stroke: rgba(255,255,255,.86); stroke-width: 4px; pointer-events: none; }
-  .detailLabel { display: none; font-size: 10.5px; font-weight: 800; paint-order: stroke; stroke: rgba(255,255,255,.9); stroke-width: 2.5px; pointer-events: none; }
-  .showDetails .detailLabel { display: block; }
+  .detailLabel { display: none; font-size: 9px; font-weight: 800; paint-order: stroke; stroke: rgba(255,255,255,.92); stroke-width: 2.2px; pointer-events: none; }
+  .tileImage { opacity: .78; }
   .legend {
     position: absolute;
     left: 26px;
@@ -503,6 +622,20 @@ const interactiveHtml = `<!doctype html>
   .swatches { display: flex; gap: 8px; align-items: center; }
   .swatch { width: 46px; height: 16px; border-radius: 4px; }
   .legendLabels { display: flex; gap: 21px; margin-top: 6px; color: var(--muted); font-size: 12px; }
+  .tileAttribution {
+    position: absolute;
+    right: 18px;
+    bottom: 16px;
+    z-index: 4;
+    display: none;
+    background: rgba(255,255,255,.82);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 5px 8px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .mapTilesOn .tileAttribution { display: block; }
   .tooltip {
     position: fixed;
     z-index: 10;
@@ -586,9 +719,11 @@ const interactiveHtml = `<!doctype html>
       <button id="zoomOut">缩小</button>
       <button id="reset">重置</button>
       <button id="toggleLabels">城市名</button>
+      <button id="toggleTiles">真实地图</button>
     </div>
-    <svg id="map" viewBox="0 0 ${W} ${H}" aria-label="粤港澳大湾区房价地图">
+    <svg id="map" viewBox="${mapViewBox.x.toFixed(2)} ${mapViewBox.y.toFixed(2)} ${mapViewBox.w.toFixed(2)} ${mapViewBox.h.toFixed(2)}" aria-label="粤港澳大湾区房价地图">
       <g id="viewport">
+        <g id="tileLayer"></g>
         ${interactiveRegions.map(r => `<path id="${r.id}" class="region" data-city="${esc(r.city)}" data-name="${esc(r.name)}" data-price="${r.price ?? ""}" data-mom="${esc(r.mom)}" d="${r.d}" fill="${r.fill}"></path>`).join("\n")}
         <g id="cityLabels">
           ${Object.entries(cityCenters).map(([city, center]) => {
@@ -597,7 +732,7 @@ const interactiveHtml = `<!doctype html>
           }).join("\n")}
         </g>
         <g id="detailLabels">
-          ${interactiveRegions.filter(r => r.price).map(r => `<text class="detailLabel" x="${r.cx}" y="${r.cy + 16}" text-anchor="middle">${esc(r.name.replace(/[区县市镇]/g, ""))} ${Math.round(r.price / 1000)}k</text>`).join("\n")}
+          ${interactiveRegions.filter(r => r.price).map(r => `<text class="detailLabel" x="${r.cx}" y="${r.cy}" data-min-scale="${r.labelMinScale}" text-anchor="middle">${esc(r.label)} ${Math.round(r.price / 1000)}k</text>`).join("\n")}
           ${interactivePoints.filter(p => p.price).map(p => `<text class="detailLabel" x="${p.x}" y="${p.y - 12}" text-anchor="middle">${esc(p.name.replace(/[区县市镇]/g, ""))} ${Math.round(p.price / 1000)}k</text>`).join("\n")}
         </g>
         <g id="townPoints">
@@ -610,6 +745,7 @@ const interactiveHtml = `<!doctype html>
       <div class="swatches">${colors.map(c => `<span class="swatch" style="background:${c}"></span>`).join("")}</div>
       <div class="legendLabels"><span>&lt;8k</span><span>8-12k</span><span>12-18k</span><span>18-30k</span><span>30-50k</span><span>50-80k</span><span>80k+</span></div>
     </div>
+    <div class="tileAttribution">地图 © OpenStreetMap contributors</div>
   </section>
   <aside class="side">
     <h2>区县/城市数据</h2>
@@ -646,6 +782,8 @@ const hkStats = ${JSON.stringify(hkStats)};
 const macauStats = ${JSON.stringify(macauStats)};
 const svg = document.getElementById('map');
 const viewport = document.getElementById('viewport');
+const mapShell = document.querySelector('.mapShell');
+const tileLayer = document.getElementById('tileLayer');
 const tooltip = document.getElementById('tooltip');
 const selected = document.getElementById('selected');
 const rows = document.getElementById('rows');
@@ -656,31 +794,188 @@ let last = null;
 let activeId = null;
 let labelsVisible = true;
 let sortMode = 'priceDesc';
+let tilesVisible = false;
+const projection = {
+  minX: ${minX},
+  minY: ${minY},
+  maxX: ${maxX},
+  maxY: ${maxY},
+  scale: ${scale},
+  ox: ${ox},
+  oy: ${oy}
+};
+const mapBounds = ${JSON.stringify(projectedMapBounds)};
 
 function fmt(value) {
   return Number(value).toLocaleString('zh-CN');
 }
+function clientToSvg(clientX, clientY) {
+  const pt = svg.createSVGPoint();
+  pt.x = clientX;
+  pt.y = clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+function svgToContent(point) {
+  return {
+    x: (point.x - state.x) / state.scale,
+    y: (point.y - state.y) / state.scale,
+  };
+}
+function svgVisibleBox() {
+  const rect = svg.getBoundingClientRect();
+  const corners = [
+    clientToSvg(rect.left, rect.top),
+    clientToSvg(rect.right, rect.top),
+    clientToSvg(rect.right, rect.bottom),
+    clientToSvg(rect.left, rect.bottom),
+  ];
+  return {
+    minX: Math.min(...corners.map(p => p.x)),
+    maxX: Math.max(...corners.map(p => p.x)),
+    minY: Math.min(...corners.map(p => p.y)),
+    maxY: Math.max(...corners.map(p => p.y)),
+  };
+}
+function clampValue(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+function clampPan() {
+  const view = svgVisibleBox();
+  const viewW = view.maxX - view.minX;
+  const viewH = view.maxY - view.minY;
+  const padX = Math.min(90, viewW * 0.16);
+  const padY = Math.min(90, viewH * 0.16);
+  const mapW = (mapBounds.maxX - mapBounds.minX) * state.scale;
+  const mapH = (mapBounds.maxY - mapBounds.minY) * state.scale;
+  const centerX = (view.minX + view.maxX - (mapBounds.minX + mapBounds.maxX) * state.scale) / 2;
+  const centerY = (view.minY + view.maxY - (mapBounds.minY + mapBounds.maxY) * state.scale) / 2;
+  if (mapW <= viewW - padX * 2) {
+    state.x = centerX;
+  } else {
+    state.x = clampValue(
+      state.x,
+      view.maxX - padX - mapBounds.maxX * state.scale,
+      view.minX + padX - mapBounds.minX * state.scale
+    );
+  }
+  if (mapH <= viewH - padY * 2) {
+    state.y = centerY;
+  } else {
+    state.y = clampValue(
+      state.y,
+      view.maxY - padY - mapBounds.maxY * state.scale,
+      view.minY + padY - mapBounds.minY * state.scale
+    );
+  }
+}
+function mercatorToLat(y) {
+  return (Math.atan(Math.exp(y * Math.PI / 180)) * 2 - Math.PI / 2) * 180 / Math.PI;
+}
+function svgToLonLat(x, y) {
+  const lon = (x - projection.ox) / projection.scale + projection.minX;
+  const mercY = projection.minY + (projection.oy - y) / projection.scale;
+  return [lon, mercatorToLat(mercY)];
+}
+function projectLonLat(lon, lat) {
+  const rad = lat * Math.PI / 180;
+  const mercY = Math.log(Math.tan(Math.PI / 4 + rad / 2)) * 180 / Math.PI;
+  return {
+    x: projection.ox + (lon - projection.minX) * projection.scale,
+    y: projection.oy - (mercY - projection.minY) * projection.scale,
+  };
+}
+function lonToTileX(lon, z) {
+  return Math.floor((lon + 180) / 360 * Math.pow(2, z));
+}
+function latToTileY(lat, z) {
+  const rad = lat * Math.PI / 180;
+  return Math.floor((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * Math.pow(2, z));
+}
+function tileXToLon(x, z) {
+  return x / Math.pow(2, z) * 360 - 180;
+}
+function tileYToLat(y, z) {
+  const n = Math.PI - 2 * Math.PI * y / Math.pow(2, z);
+  return Math.atan(Math.sinh(n)) * 180 / Math.PI;
+}
+function visibleContentBounds() {
+  const view = svgVisibleBox();
+  const corners = [
+    { x: view.minX, y: view.minY },
+    { x: view.maxX, y: view.minY },
+    { x: view.maxX, y: view.maxY },
+    { x: view.minX, y: view.maxY },
+  ].map(svgToContent);
+  return {
+    minX: Math.min(...corners.map(p => p.x)),
+    maxX: Math.max(...corners.map(p => p.x)),
+    minY: Math.min(...corners.map(p => p.y)),
+    maxY: Math.max(...corners.map(p => p.y)),
+  };
+}
+function updateTiles() {
+  if (!tilesVisible) {
+    tileLayer.innerHTML = '';
+    return;
+  }
+  const b = visibleContentBounds();
+  const nw = svgToLonLat(b.minX, b.minY);
+  const se = svgToLonLat(b.maxX, b.maxY);
+  const west = Math.max(-180, Math.min(nw[0], se[0]));
+  const east = Math.min(180, Math.max(nw[0], se[0]));
+  const north = Math.max(-85, Math.min(85, Math.max(nw[1], se[1])));
+  const south = Math.max(-85, Math.min(85, Math.min(nw[1], se[1])));
+  let z = Math.max(8, Math.min(14, Math.round(9.5 + Math.log2(state.scale))));
+  let x0 = lonToTileX(west, z), x1 = lonToTileX(east, z);
+  let y0 = latToTileY(north, z), y1 = latToTileY(south, z);
+  while ((x1 - x0 + 1) * (y1 - y0 + 1) > 72 && z > 7) {
+    z -= 1;
+    x0 = lonToTileX(west, z); x1 = lonToTileX(east, z);
+    y0 = latToTileY(north, z); y1 = latToTileY(south, z);
+  }
+  const n = Math.pow(2, z);
+  const tiles = [];
+  for (let x = Math.max(0, x0 - 1); x <= Math.min(n - 1, x1 + 1); x++) {
+    for (let y = Math.max(0, y0 - 1); y <= Math.min(n - 1, y1 + 1); y++) {
+      const lon1 = tileXToLon(x, z);
+      const lon2 = tileXToLon(x + 1, z);
+      const lat1 = tileYToLat(y, z);
+      const lat2 = tileYToLat(y + 1, z);
+      const p1 = projectLonLat(lon1, lat1);
+      const p2 = projectLonLat(lon2, lat2);
+      tiles.push('<image class="tileImage" href="https://tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png" x="' + p1.x + '" y="' + p1.y + '" width="' + (p2.x - p1.x) + '" height="' + (p2.y - p1.y) + '" preserveAspectRatio="none"></image>');
+    }
+  }
+  tileLayer.innerHTML = tiles.join('');
+}
 function applyTransform() {
+  clampPan();
   viewport.setAttribute('transform', 'translate(' + state.x + ' ' + state.y + ') scale(' + state.scale + ')');
-  viewport.classList.toggle('showDetails', state.scale >= 2.15);
   const inverse = 1 / state.scale;
   document.querySelectorAll('.detailLabel, .cityLabel').forEach(label => {
     const x = Number(label.getAttribute('x'));
     const y = Number(label.getAttribute('y'));
     label.setAttribute('transform', 'translate(' + x + ' ' + y + ') scale(' + inverse + ') translate(' + -x + ' ' + -y + ')');
   });
+  document.querySelectorAll('.detailLabel').forEach(label => {
+    const min = Number(label.dataset.minScale || 2.2);
+    label.style.display = state.scale >= min ? 'block' : 'none';
+  });
+  updateTiles();
 }
-function zoom(factor, cx = svg.clientWidth / 2, cy = svg.clientHeight / 2) {
-  const pt = svg.createSVGPoint();
-  pt.x = cx; pt.y = cy;
-  const before = pt.matrixTransform(svg.getScreenCTM().inverse());
-  state.scale = Math.max(0.7, Math.min(7, state.scale * factor));
-  state.x = before.x - (before.x - state.x) * factor;
-  state.y = before.y - (before.y - state.y) * factor;
+function zoom(factor, clientX, clientY) {
+  const rect = svg.getBoundingClientRect();
+  const anchor = clientToSvg(clientX ?? (rect.left + rect.width / 2), clientY ?? (rect.top + rect.height / 2));
+  const content = svgToContent(anchor);
+  const nextScale = Math.max(0.7, Math.min(7, state.scale * factor));
+  state.x = anchor.x - content.x * nextScale;
+  state.y = anchor.y - content.y * nextScale;
+  state.scale = nextScale;
   applyTransform();
 }
 function selectRegion(id, center = false) {
   activeId = id;
+  hideTip();
   document.querySelectorAll('.region').forEach(el => el.classList.toggle('active', el.id === id));
   document.querySelectorAll('.townPoint').forEach(el => el.classList.toggle('active', el.id === id));
   document.querySelectorAll('.row').forEach(el => el.classList.toggle('active', el.dataset.id === id));
@@ -693,8 +988,10 @@ function selectRegion(id, center = false) {
     state.scale = Math.max(state.scale, 2.3);
     const cx = r.cx ?? r.x;
     const cy = r.cy ?? r.y;
-    state.x = ${W / 2} - cx * state.scale;
-    state.y = ${H / 2} - cy * state.scale;
+    const rect = svg.getBoundingClientRect();
+    const centerPoint = clientToSvg(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    state.x = centerPoint.x - cx * state.scale;
+    state.y = centerPoint.y - cy * state.scale;
     applyTransform();
   }
 }
@@ -724,14 +1021,15 @@ svg.addEventListener('wheel', event => {
 }, { passive: false });
 svg.addEventListener('pointerdown', event => {
   dragging = true;
-  last = { x: event.clientX, y: event.clientY };
+  last = clientToSvg(event.clientX, event.clientY);
   svg.classList.add('dragging');
 });
 window.addEventListener('pointermove', event => {
   if (!dragging) return;
-  state.x += event.clientX - last.x;
-  state.y += event.clientY - last.y;
-  last = { x: event.clientX, y: event.clientY };
+  const point = clientToSvg(event.clientX, event.clientY);
+  state.x += point.x - last.x;
+  state.y += point.y - last.y;
+  last = point;
   applyTransform();
 });
 window.addEventListener('pointerup', () => {
@@ -747,6 +1045,12 @@ document.getElementById('reset').onclick = () => {
 document.getElementById('toggleLabels').onclick = () => {
   labelsVisible = !labelsVisible;
   document.getElementById('cityLabels').style.display = labelsVisible ? '' : 'none';
+};
+document.getElementById('toggleTiles').onclick = event => {
+  tilesVisible = !tilesVisible;
+  event.currentTarget.classList.toggle('active', tilesVisible);
+  mapShell.classList.toggle('mapTilesOn', tilesVisible);
+  updateTiles();
 };
 function momValue(value) {
   return Number(String(value || '0').replace('%', ''));
