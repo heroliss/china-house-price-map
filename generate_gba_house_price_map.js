@@ -119,7 +119,97 @@ function readGeo(city, file) {
   return geo.features;
 }
 
-const features = cityFiles.flatMap(([city, file]) => readGeo(city, file));
+function cleanAdminName(name) {
+  return name
+    .replace(/街道办事处$/, "街道")
+    .replace(/高技术产业开发区$/, "开发区")
+    .replace(/街道|镇|区|市|园区/g, "");
+}
+
+const townAliases = {
+  "东莞|南城街道": "南城区",
+  "东莞|东城街道": "东城区",
+  "东莞|万江街道": "万江区",
+  "中山|东区街道": "东区",
+  "中山|西区街道": "西区",
+  "中山|南区街道": "南区",
+  "中山|石岐街道": "石岐区",
+  "中山|南朗街道": "南朗镇",
+  "中山|中山港街道": "火炬开发区",
+};
+
+function townDisplayName(city, osmName) {
+  return townAliases[`${city}|${osmName}`] || osmName;
+}
+
+function pointKey(pt) {
+  return `${pt[0].toFixed(7)},${pt[1].toFixed(7)}`;
+}
+
+function stitchRings(segments) {
+  const unused = segments
+    .filter(seg => seg.length > 1)
+    .map(seg => seg.map(pt => [pt[0], pt[1]]));
+  const rings = [];
+  while (unused.length) {
+    const ring = unused.shift();
+    let guard = 0;
+    while (unused.length && guard++ < 500) {
+      const end = pointKey(ring[ring.length - 1]);
+      const start = pointKey(ring[0]);
+      if (end === start) break;
+      const idx = unused.findIndex(seg => pointKey(seg[0]) === end || pointKey(seg[seg.length - 1]) === end);
+      if (idx === -1) break;
+      const next = unused.splice(idx, 1)[0];
+      if (pointKey(next[next.length - 1]) === end) next.reverse();
+      ring.push(...next.slice(1));
+    }
+    if (ring.length > 2) {
+      if (pointKey(ring[0]) !== pointKey(ring[ring.length - 1])) ring.push(ring[0]);
+      rings.push(ring);
+    }
+  }
+  return rings;
+}
+
+function readOsmTownBoundaries(city, file) {
+  const sourcePath = path.join(__dirname, file);
+  if (!fs.existsSync(sourcePath)) return [];
+  const osm = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
+  return osm.elements
+    .filter(el => el.type === "relation" && el.tags?.boundary === "administrative" && el.tags?.admin_level === "8")
+    .map(el => {
+      const segments = el.members
+        .filter(m => m.type === "way" && m.role === "outer" && Array.isArray(m.geometry))
+        .map(m => m.geometry.map(p => [p.lon, p.lat]));
+      const rings = stitchRings(segments);
+      if (!rings.length) return null;
+      const name = townDisplayName(city, el.tags.name);
+      const labelNode = el.members.find(m => m.role === "label" && Number.isFinite(m.lon) && Number.isFinite(m.lat));
+      return {
+        type: "Feature",
+        properties: {
+          adcode: el.id,
+          city,
+          name,
+          sourceName: el.tags.name,
+          level: "town",
+          centroid: labelNode ? [labelNode.lon, labelNode.lat] : [(el.bounds.minlon + el.bounds.maxlon) / 2, (el.bounds.minlat + el.bounds.maxlat) / 2],
+        },
+        geometry: { type: "MultiPolygon", coordinates: rings.map(ring => [ring]) },
+      };
+    })
+    .filter(Boolean);
+}
+
+const baseFeatures = cityFiles.flatMap(([city, file]) => readGeo(city, file));
+const townBoundaryFeatures = [
+  ...readOsmTownBoundaries("东莞", "osm_dongguan_boundaries.json"),
+  ...readOsmTownBoundaries("中山", "osm_zhongshan_boundaries.json"),
+];
+const features = baseFeatures
+  .filter(f => !["东莞", "中山"].includes(f.properties.city))
+  .concat(townBoundaryFeatures);
 const mainland = features.filter(f => !["香港", "澳门"].includes(f.properties.city));
 
 function walkCoords(geom, fn) {
@@ -332,10 +422,7 @@ const interactiveRegions = features.map((f, index) => {
     fill: colorFor(price, f.properties.city),
   };
 });
-const interactivePoints = townPoints.map(p => {
-  const [x, y] = project([p.lon, p.lat]);
-  return { ...p, x: Number(x.toFixed(2)), y: Number(y.toFixed(2)), fill: colorFor(p.price, p.city) };
-});
+const interactivePoints = [];
 
 const interactiveHtml = `<!doctype html>
 <html lang="zh-CN">
@@ -399,8 +486,8 @@ const interactiveHtml = `<!doctype html>
   .townPoint { stroke: #fff; stroke-width: 2; cursor: pointer; filter: drop-shadow(0 3px 5px rgba(25,55,65,.25)); }
   .townPoint:hover, .townPoint.active { stroke: #102a33; stroke-width: 3; }
   .dimmed { opacity: .18; }
-  .cityLabel { font-size: 18px; font-weight: 800; paint-order: stroke; stroke: rgba(255,255,255,.86); stroke-width: 5px; pointer-events: none; }
-  .detailLabel { display: none; font-size: 13px; font-weight: 800; paint-order: stroke; stroke: rgba(255,255,255,.9); stroke-width: 4px; pointer-events: none; }
+  .cityLabel { font-size: 16px; font-weight: 800; paint-order: stroke; stroke: rgba(255,255,255,.86); stroke-width: 4px; pointer-events: none; }
+  .detailLabel { display: none; font-size: 10.5px; font-weight: 800; paint-order: stroke; stroke: rgba(255,255,255,.9); stroke-width: 2.5px; pointer-events: none; }
   .showDetails .detailLabel { display: block; }
   .legend {
     position: absolute;
@@ -435,6 +522,23 @@ const interactiveHtml = `<!doctype html>
   .side h2 { margin: 0 0 6px; font-size: 24px; }
   .side .caption { color: var(--muted); margin: 0 0 16px; font-size: 13px; }
   .search { width: 100%; height: 40px; padding: 0 12px; margin-bottom: 14px; }
+  .sortBar {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .sortBar button {
+    height: 32px;
+    padding: 0 8px;
+    font-size: 13px;
+  }
+  .sortBar button.active {
+    border-color: #2f89a6;
+    background: #edf7f6;
+    color: #1f6677;
+    font-weight: 800;
+  }
   .selected {
     min-height: 104px;
     border: 1px solid var(--line);
@@ -509,8 +613,16 @@ const interactiveHtml = `<!doctype html>
   </section>
   <aside class="side">
     <h2>区县/城市数据</h2>
-      <p class="caption">内地为 2026年4月住宅挂牌均价；东莞/中山镇街以点位呈现，港澳为独立公开指数口径。</p>
+    <p class="caption">内地为 2026年4月住宅挂牌均价；东莞/中山按镇街边界呈现，港澳为独立公开指数口径。</p>
     <input id="search" class="search" placeholder="搜索城市或区县，如 南山、广州、东莞">
+    <div class="sortBar" aria-label="排序">
+      <button data-sort="priceDesc" class="active">价格高</button>
+      <button data-sort="priceAsc">价格低</button>
+      <button data-sort="momDesc">涨幅高</button>
+      <button data-sort="momAsc">跌幅高</button>
+      <button data-sort="city">按城市</button>
+      <button data-sort="name">按名称</button>
+    </div>
     <div id="selected" class="selected">
       <div class="name">点击或悬停地图区域</div>
       <div class="meta">可查看房价、环比和数据口径。</div>
@@ -519,7 +631,7 @@ const interactiveHtml = `<!doctype html>
     <div class="notes">
       <b>香港：</b>中原 Centadata 分区领先指数，2026/05/08更新。<br>
       <b>澳门：</b>统计暨普查局 2026年第一季住宅楼价指数。<br>
-      <b>镇街：</b>东莞、中山没有县级区划，镇街以中心点展示，公开镇街边界未纳入填色。<br>
+      <b>镇街：</b>东莞、中山没有县级区划，已按 OSM 镇街边界展示；无房价数据的镇街为浅灰。<br>
       <b>底图：</b>阿里云 DataV.GeoAtlas。港澳口径不同，未纳入元/㎡色阶。
     </div>
   </aside>
@@ -543,6 +655,7 @@ let dragging = false;
 let last = null;
 let activeId = null;
 let labelsVisible = true;
+let sortMode = 'priceDesc';
 
 function fmt(value) {
   return Number(value).toLocaleString('zh-CN');
@@ -550,6 +663,12 @@ function fmt(value) {
 function applyTransform() {
   viewport.setAttribute('transform', 'translate(' + state.x + ' ' + state.y + ') scale(' + state.scale + ')');
   viewport.classList.toggle('showDetails', state.scale >= 2.15);
+  const inverse = 1 / state.scale;
+  document.querySelectorAll('.detailLabel, .cityLabel').forEach(label => {
+    const x = Number(label.getAttribute('x'));
+    const y = Number(label.getAttribute('y'));
+    label.setAttribute('transform', 'translate(' + x + ' ' + y + ') scale(' + inverse + ') translate(' + -x + ' ' + -y + ')');
+  });
 }
 function zoom(factor, cx = svg.clientWidth / 2, cy = svg.clientHeight / 2) {
   const pt = svg.createSVGPoint();
@@ -629,12 +748,25 @@ document.getElementById('toggleLabels').onclick = () => {
   labelsVisible = !labelsVisible;
   document.getElementById('cityLabels').style.display = labelsVisible ? '' : 'none';
 };
+function momValue(value) {
+  return Number(String(value || '0').replace('%', ''));
+}
+function sortPlaces(list) {
+  const collator = new Intl.Collator('zh-Hans-CN');
+  return list.sort((a, b) => {
+    if (sortMode === 'priceAsc') return a.price - b.price;
+    if (sortMode === 'momDesc') return momValue(b.mom) - momValue(a.mom);
+    if (sortMode === 'momAsc') return momValue(a.mom) - momValue(b.mom);
+    if (sortMode === 'city') return collator.compare(a.city + a.name, b.city + b.name);
+    if (sortMode === 'name') return collator.compare(a.name, b.name);
+    return b.price - a.price;
+  });
+}
 function renderRows(filter = '') {
   const q = filter.trim().toLowerCase();
-  const main = places
+  const main = sortPlaces(places
     .filter(r => r.price)
-    .filter(r => !q || (r.city + r.name).toLowerCase().includes(q))
-    .sort((a, b) => b.price - a.price);
+    .filter(r => !q || (r.city + r.name).toLowerCase().includes(q)));
   rows.innerHTML = main.map(r => '<div class="row" data-id="' + r.id + '">' +
     '<b>' + r.city + ' ' + r.name + '</b><span class="price">' + fmt(r.price) + '</span><span class="' + (r.mom.startsWith('+') ? 'up' : 'down') + '">' + r.mom + '</span></div>').join('');
   rows.querySelectorAll('.row').forEach(row => {
@@ -651,8 +783,16 @@ function renderRows(filter = '') {
     el.classList.toggle('dimmed', !match);
   });
 }
+document.querySelectorAll('.sortBar button').forEach(button => {
+  button.addEventListener('click', () => {
+    sortMode = button.dataset.sort;
+    document.querySelectorAll('.sortBar button').forEach(item => item.classList.toggle('active', item === button));
+    renderRows(search.value);
+  });
+});
 search.addEventListener('input', () => renderRows(search.value));
 renderRows();
+applyTransform();
 </script>
 </body>
 </html>`;
