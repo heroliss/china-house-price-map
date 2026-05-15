@@ -553,6 +553,7 @@ const interactiveHtml = `<!doctype html>
     --line: #dbe6e3;
     --brand: #2f89a6;
     --bg: #f5faf8;
+    --overlay-opacity: .62;
   }
   * { box-sizing: border-box; }
   body {
@@ -598,11 +599,11 @@ const interactiveHtml = `<!doctype html>
   button.active { border-color: #2f89a6; background: #edf7f6; color: #1f6677; font-weight: 800; }
   svg { width: 100%; height: calc(100vh - 48px); display: block; cursor: grab; }
   svg.dragging { cursor: grabbing; }
-  .region { stroke: #fff; stroke-width: 1.2; transition: opacity .15s, stroke-width .15s, filter .15s; }
+  .region { stroke: #fff; stroke-width: 1.2; vector-effect: non-scaling-stroke; transition: opacity .15s, stroke-width .15s, filter .15s, fill-opacity .15s; }
   .region:hover, .region.active { stroke: #102a33; stroke-width: 2.8; filter: drop-shadow(0 5px 8px rgba(25,55,65,.25)); }
-  .mapTilesOn .region { fill-opacity: .62; stroke-opacity: .88; }
+  .mapTilesOn .region { fill-opacity: var(--overlay-opacity); stroke-opacity: .88; }
   .mapTilesOn .cityLabel, .mapTilesOn .detailLabel { stroke: rgba(255,255,255,.95); }
-  .townPoint { stroke: #fff; stroke-width: 2; cursor: pointer; filter: drop-shadow(0 3px 5px rgba(25,55,65,.25)); }
+  .townPoint { stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: pointer; filter: drop-shadow(0 3px 5px rgba(25,55,65,.25)); }
   .townPoint:hover, .townPoint.active { stroke: #102a33; stroke-width: 3; }
   .dimmed { opacity: .18; }
   .cityLabel { font-size: 16px; font-weight: 800; paint-order: stroke; stroke: rgba(255,255,255,.86); stroke-width: 4px; pointer-events: none; }
@@ -636,6 +637,27 @@ const interactiveHtml = `<!doctype html>
     font-size: 11px;
   }
   .mapTilesOn .tileAttribution { display: block; }
+  .overlayControl {
+    position: absolute;
+    right: 18px;
+    top: 62px;
+    z-index: 4;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    width: 272px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(255,255,255,.88);
+    box-shadow: 0 10px 24px rgba(37, 70, 80, .10);
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .mapTilesOn .overlayControl { display: flex; }
+  .overlayControl input { flex: 1; accent-color: var(--brand); }
+  .overlayControl span { min-width: 34px; text-align: right; color: var(--muted); font-weight: 700; }
   .tooltip {
     position: fixed;
     z-index: 10;
@@ -721,6 +743,11 @@ const interactiveHtml = `<!doctype html>
       <button id="toggleLabels">城市名</button>
       <button id="toggleTiles">真实地图</button>
     </div>
+    <div class="overlayControl" id="overlayControl">
+      <label for="overlayOpacity">房价图层</label>
+      <input id="overlayOpacity" type="range" min="0" max="100" value="62">
+      <span id="overlayOpacityValue">62%</span>
+    </div>
     <svg id="map" viewBox="${mapViewBox.x.toFixed(2)} ${mapViewBox.y.toFixed(2)} ${mapViewBox.w.toFixed(2)} ${mapViewBox.h.toFixed(2)}" aria-label="粤港澳大湾区房价地图">
       <g id="viewport">
         <g id="tileLayer"></g>
@@ -784,6 +811,8 @@ const svg = document.getElementById('map');
 const viewport = document.getElementById('viewport');
 const mapShell = document.querySelector('.mapShell');
 const tileLayer = document.getElementById('tileLayer');
+const overlayOpacityInput = document.getElementById('overlayOpacity');
+const overlayOpacityValue = document.getElementById('overlayOpacityValue');
 const tooltip = document.getElementById('tooltip');
 const selected = document.getElementById('selected');
 const rows = document.getElementById('rows');
@@ -795,6 +824,7 @@ let activeId = null;
 let labelsVisible = true;
 let sortMode = 'priceDesc';
 let tilesVisible = false;
+let overlayOpacity = Number(overlayOpacityInput.value) / 100;
 const projection = {
   minX: ${minX},
   minY: ${minY},
@@ -808,6 +838,10 @@ const mapBounds = ${JSON.stringify(projectedMapBounds)};
 
 function fmt(value) {
   return Number(value).toLocaleString('zh-CN');
+}
+function applyOverlayOpacity() {
+  document.documentElement.style.setProperty('--overlay-opacity', overlayOpacity.toFixed(2));
+  overlayOpacityValue.textContent = Math.round(overlayOpacity * 100) + '%';
 }
 function clientToSvg(clientX, clientY) {
   const pt = svg.createSVGPoint();
@@ -1052,6 +1086,10 @@ document.getElementById('toggleTiles').onclick = event => {
   mapShell.classList.toggle('mapTilesOn', tilesVisible);
   updateTiles();
 };
+overlayOpacityInput.addEventListener('input', () => {
+  overlayOpacity = Number(overlayOpacityInput.value) / 100;
+  applyOverlayOpacity();
+});
 function momValue(value) {
   return Number(String(value || '0').replace('%', ''));
 }
@@ -1096,6 +1134,7 @@ document.querySelectorAll('.sortBar button').forEach(button => {
 });
 search.addEventListener('input', () => renderRows(search.value));
 renderRows();
+applyOverlayOpacity();
 applyTransform();
 </script>
 </body>
