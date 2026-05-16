@@ -4,7 +4,6 @@ const fs = require("fs");
 const path = require("path");
 const {
   createInteractiveMap,
-  readGeoFeatures,
   formatBeijingTime,
   buildProjection,
   bestLabelPoint,
@@ -13,11 +12,11 @@ const {
   geomToSimplifiedPath,
 } = require("./src/simple_map_core");
 const {
-  TOPIC_MAPS,
+  PROVINCES,
   createPriceLookup,
   loadChinaFeatures,
   loadChinaOutlines,
-  topicLinksHtml,
+  normalizeCity,
 } = require("./src/china_map_shared");
 
 const ROOT = path.resolve(__dirname);
@@ -25,6 +24,7 @@ const DATA_FILE = path.join(ROOT, "data", "china_house_prices.json");
 const GBA_DATA_FILE = path.join(ROOT, "data", "gba_house_prices.json");
 const JJJ_DATA_FILE = path.join(ROOT, "data", "jjj_house_prices.json");
 const LAYER_DIR = path.join(ROOT, "data", "layers");
+const CITY_GEO_DIR = path.join(ROOT, "data", "geo", "city");
 const OUT_HTML = path.join(ROOT, "china.html");
 const OUT_INDEX = path.join(ROOT, "index.html");
 
@@ -32,39 +32,7 @@ const MAP_BOX = { x: 56, y: 112, w: 1220, h: 1100 };
 const COLORS = ["#2b6cb0", "#4fa3c8", "#8fd0d0", "#f2e6a7", "#f3a05f", "#d95845", "#9e1f2f", "#64152d"];
 const BREAKS = [0, 8000, 12000, 18000, 30000, 50000, 80000, 120000, 180000];
 
-const GBA_FILES = [
-  ["广州", "datav_440100_full.json"],
-  ["深圳", "datav_440300_full.json"],
-  ["珠海", "datav_440400_full.json"],
-  ["佛山", "datav_440600_full.json"],
-  ["江门", "datav_440700_full.json"],
-  ["肇庆", "datav_441200_full.json"],
-  ["惠州", "datav_441300_full.json"],
-  ["东莞", "datav_441900.json"],
-  ["中山", "datav_442000.json"],
-  ["香港", "datav_810000_full.json"],
-  ["澳门", "datav_820000_full.json"],
-];
-
-const GBA_OUTLINE_FILES = [
-  ["广州", "datav_440100.json"],
-  ["深圳", "datav_440300.json"],
-  ["珠海", "datav_440400.json"],
-  ["佛山", "datav_440600.json"],
-  ["江门", "datav_440700.json"],
-  ["肇庆", "datav_441200.json"],
-  ["惠州", "datav_441300.json"],
-  ["东莞", "datav_441900.json"],
-  ["中山", "datav_442000.json"],
-  ["香港", "datav_810000.json"],
-  ["澳门", "datav_820000.json"],
-];
-
-const HEBEI_CITIES = [
-  ["石家庄市", "130100"], ["唐山市", "130200"], ["秦皇岛市", "130300"], ["邯郸市", "130400"],
-  ["邢台市", "130500"], ["保定市", "130600"], ["张家口市", "130700"], ["承德市", "130800"],
-  ["沧州市", "130900"], ["廊坊市", "131000"], ["衡水市", "131100"],
-];
+const MUNICIPALITIES = new Set(["110000", "120000", "310000", "500000", "710000", "810000", "820000"]);
 
 const VIEW_PRESETS = [
   { id: "national", label: "全国", center: [104, 35.5], scale: 0.9 },
@@ -89,6 +57,7 @@ function readOptionalJson(file) {
 }
 
 function regionBounds(regions) {
+  if (!regions.length) return null;
   return regions.reduce((acc, r) => ({
     minX: Math.min(acc.minX, r.cx),
     minY: Math.min(acc.minY, r.cy),
@@ -101,7 +70,7 @@ function createLayerPayload(id, features, outlines, projection, getRecord, toler
   const regions = features.map((feature, index) => {
     const city = feature.properties.city;
     const name = feature.properties.name;
-    const record = getRecord(city, name);
+    const record = getRecord(city, name, feature);
     const price = record?.price || null;
     const [cx, cy, labelBox] = bestLabelPoint(feature, projection.project);
     const label = cleanName(name);
@@ -138,39 +107,136 @@ function writeDetailLayer(filename, payload) {
   fs.writeFileSync(path.join(LAYER_DIR, filename), `${JSON.stringify(payload)}\n`, "utf8");
 }
 
-function buildGbaLayer(projection) {
-  const data = readOptionalJson(GBA_DATA_FILE);
-  const table = data.mainlandData || {};
-  const features = readGeoFeatures(ROOT, GBA_FILES.map(([city, file]) => ({ city, file })));
-  const outlines = readGeoFeatures(ROOT, GBA_OUTLINE_FILES.map(([city, file]) => ({ city, file })));
-  return createLayerPayload("gba-detail", features, outlines, projection, (city, name) => {
-    const direct = table[`${city}|${name}`] || table[`${city}|${name}市`];
-    if (!direct) return null;
-    return { price: direct[0], mom: direct[1], source: "禧泰数据/中国房价行情", quality: "区县住宅挂牌均价" };
-  });
+function withPlace(feature, province, city, name, extra = {}) {
+  return {
+    ...feature,
+    properties: {
+      ...(feature.properties || {}),
+      province,
+      city,
+      name,
+      ...extra,
+    },
+  };
 }
 
-function buildJjjLayer(projection) {
-  const data = readOptionalJson(JJJ_DATA_FILE);
-  const table = data.mainlandData || {};
-  const features = readGeoFeatures(ROOT, [
-    { city: "北京", file: "data/geo/datav_110000_full.json" },
-    { city: "天津", file: "data/geo/datav_120000_full.json" },
-    ...HEBEI_CITIES.map(([city, code]) => ({ city, file: `data/geo/datav_${code}_full.json` })),
-  ]);
-  const outlines = readGeoFeatures(ROOT, [
-    { city: "北京", file: "data/geo/datav_110000.json" },
-    { city: "天津", file: "data/geo/datav_120000.json" },
-    ...HEBEI_CITIES.map(([city, code]) => ({ city, file: `data/geo/datav_${code}.json` })),
-    { city: "河北", file: "data/geo/datav_130000.json" },
-  ]);
-  return createLayerPayload("jjj-detail", features, outlines, projection, (city, name) => {
-    const direct = table[`${city}|${name}`];
-    if (direct) return { price: direct[0], mom: direct[1], source: "禧泰数据/中国房价行情", quality: "区县住宅挂牌均价" };
-    const cityAverage = table[`河北|${city}`];
-    if (cityAverage) return { price: cityAverage[0], mom: cityAverage[1], source: "禧泰数据/中国房价行情", quality: "城市住宅挂牌均价，用于该市区县底色", supplemental: true };
-    return null;
-  });
+function readGeo(file) {
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function cityGeoPath(code, suffix = "_full") {
+  const preferred = path.join(CITY_GEO_DIR, `datav_${code}${suffix}.json`);
+  if (fs.existsSync(preferred)) return preferred;
+  const legacy = path.join(ROOT, "data", "geo", `datav_${code}${suffix}.json`);
+  return fs.existsSync(legacy) ? legacy : null;
+}
+
+function buildSupplementalLookup(table, source, quality) {
+  const exact = new Map();
+  const normalized = new Map();
+  for (const [key, value] of Object.entries(table || {})) {
+    const [city, area] = key.split("|");
+    if (!city || !area) continue;
+    const record = { price: value[0], mom: value[1], source, quality };
+    exact.set(`${city}|${area}`, record);
+    normalized.set(`${normalizeCity(city)}|${normalizeCity(area)}`, record);
+  }
+  return (city, name) => exact.get(`${city}|${name}`)
+    || exact.get(`${city.replace(/市$/, "")}|${name}`)
+    || exact.get(`${city}|${name}市`)
+    || normalized.get(`${normalizeCity(city)}|${normalizeCity(name)}`)
+    || null;
+}
+
+function createDetailRecordLookup(chinaData) {
+  const cityLookup = createPriceLookup(chinaData);
+  const gbaLookup = buildSupplementalLookup(
+    readOptionalJson(GBA_DATA_FILE).mainlandData,
+    "禧泰数据/中国房价行情",
+    "区县住宅挂牌均价",
+  );
+  const jjjLookup = buildSupplementalLookup(
+    readOptionalJson(JJJ_DATA_FILE).mainlandData,
+    "禧泰数据/中国房价行情",
+    "区县住宅挂牌均价",
+  );
+
+  return (city, name, feature) => {
+    const province = feature?.properties?.province || city;
+    const direct = gbaLookup(city, name) || jjjLookup(city, name);
+    if (direct) return direct;
+
+    if (feature?.properties?.fallbackCityLevel) {
+      return cityLookup(province, name) || cityLookup("", name);
+    }
+
+    const cityAverage = cityLookup(province, city) || cityLookup(city, city) || cityLookup("", city);
+    return cityAverage ? {
+      ...cityAverage,
+      quality: "城市住宅挂牌均价，用于区县底色",
+      supplemental: true,
+    } : null;
+  };
+}
+
+function loadProvinceDetailFeatures(provinceName, provinceCode) {
+  const provinceFull = path.join(ROOT, "data", "geo", "china", `datav_${provinceCode}_full.json`);
+  if (!fs.existsSync(provinceFull)) return { features: [], outlines: [] };
+
+  const geo = readGeo(provinceFull);
+  if (MUNICIPALITIES.has(provinceCode)) {
+    return {
+      features: (geo.features || []).map(feature => withPlace(feature, provinceName, provinceName, feature.properties?.name || provinceName)),
+      outlines: [],
+    };
+  }
+
+  const detailFeatures = [];
+  const outlines = [];
+  for (const cityFeature of geo.features || []) {
+    const props = cityFeature.properties || {};
+    const cityName = props.name;
+    const cityCode = props.adcode;
+    if (!cityName || !cityCode) continue;
+    outlines.push(withPlace(cityFeature, provinceName, provinceName, cityName));
+
+    const fullPath = cityGeoPath(cityCode, "_full");
+    if (!fullPath) {
+      detailFeatures.push(withPlace(cityFeature, provinceName, provinceName, cityName, { fallbackCityLevel: true }));
+      continue;
+    }
+
+    const cityGeo = readGeo(fullPath);
+    const cityParts = cityGeo.features || [];
+    if (!cityParts.length) {
+      detailFeatures.push(withPlace(cityFeature, provinceName, provinceName, cityName, { fallbackCityLevel: true }));
+      continue;
+    }
+    cityParts.forEach(part => {
+      detailFeatures.push(withPlace(part, provinceName, cityName, part.properties?.name || cityName));
+    });
+  }
+  return { features: detailFeatures, outlines };
+}
+
+function buildProvinceDetailLayers(projection, data) {
+  const getRecord = createDetailRecordLookup(data);
+  return PROVINCES.map(([provinceName, provinceCode]) => {
+    const { features, outlines } = loadProvinceDetailFeatures(provinceName, provinceCode);
+    if (!features.length) return null;
+    const id = `province-${provinceCode}`;
+    const payload = createLayerPayload(id, features, outlines, projection, getRecord, 0.1);
+    if (!payload.regions.length) return null;
+    const file = `${id}.json`;
+    writeDetailLayer(file, payload);
+    return {
+      id,
+      file,
+      bounds: payload.bounds,
+      regions: payload.regions.length,
+      priced: payload.regions.filter(region => region.price).length,
+    };
+  }).filter(Boolean);
 }
 
 function main() {
@@ -181,20 +247,18 @@ function main() {
   const features = loadChinaFeatures(ROOT);
   const outlines = loadChinaOutlines(ROOT);
   const projection = buildProjection(features, MAP_BOX);
-  const gbaLayer = buildGbaLayer(projection);
-  const jjjLayer = buildJjjLayer(projection);
-  writeDetailLayer("gba-detail.json", gbaLayer);
-  writeDetailLayer("jjj-detail.json", jjjLayer);
+  const detailLayers = buildProvinceDetailLayers(projection, data);
   const getRecord = createPriceLookup(data);
   const matched = features.filter(feature => getRecord(feature.properties.city, feature.properties.name)).length;
-  const topicLinks = topicLinksHtml();
+  const detailRegionCount = detailLayers.reduce((sum, layer) => sum + layer.regions, 0);
+  const detailPricedCount = detailLayers.reduce((sum, layer) => sum + layer.priced, 0);
   const html = createInteractiveMap({
     pageTitle: "全国房价交互地图",
     title: "全国房价地图",
-    subtitle: "一张地图渐进细化；放大到重点区域后自动加载区县/镇街边界",
+    subtitle: "一张地图渐进细化；放大后自动加载区县边界和价格标签",
     updateLine: `数据：${data.metadata?.coverage || "全国城市"}；最近抓取：${fetchedAt}`,
     sideTitle: "全国城市数据",
-    caption: "全国城市住宅挂牌均价总览；放大到大湾区、京津冀会自动叠加更细边界。",
+    caption: "全国城市住宅挂牌均价总览；放大任意地区会按需叠加区县级边界。",
     width: 1800,
     height: 1320,
     mapBox: MAP_BOX,
@@ -202,17 +266,22 @@ function main() {
     features,
     outlines,
     getRecord,
+    maxScale: 80,
+    showPresetButtons: false,
     viewPresets: VIEW_PRESETS,
-    detailSources: [
-      { id: "gba", url: "data/layers/gba-detail.json", minScale: 3.5, labelScale: 3.7, bounds: gbaLayer.bounds },
-      { id: "jingjinji", url: "data/layers/jjj-detail.json", minScale: 3.0, labelScale: 3.3, bounds: jjjLayer.bounds },
-    ],
+    detailSources: detailLayers.map(layer => ({
+      id: layer.id,
+      url: `data/layers/${layer.file}`,
+      minScale: 4.2,
+      labelScale: 5.2,
+      bounds: layer.bounds,
+    })),
     notesHtml: `
       <b>更新：</b>GitHub Actions 每周一 04:00（北京时间）尝试拉取全国城市排行；页面生成 ${generatedAtText}。<br>
-      <b>渐进细化：</b>全国初始为城市级；缩放到大湾区或京津冀时自动加载区县/镇街细节图层。<br>
-      <b>覆盖：</b>当前全国底图 ${features.length} 个区域，已匹配房价 ${matched} 个；大湾区细节 ${gbaLayer.regions.length} 个区域，京津冀细节 ${jjjLayer.regions.length} 个区域。<br>
+      <b>渐进细化：</b>全国初始为城市级；缩放到任意地区时按省份懒加载区县级边界，避免一次性加载过重。<br>
+      <b>覆盖：</b>当前全国底图 ${features.length} 个城市级区域，已匹配房价 ${matched} 个；区县级细节 ${detailRegionCount} 个区域，已匹配或沿用城市均价 ${detailPricedCount} 个。<br>
       <b>口径：</b>主数据为禧泰数据/中国房价行情城市住宅挂牌均价；香港、澳门使用补充估算并以不同口径标注。<br>
-      <b>快捷视角：</b>${topicLinks} 等旧专题入口会自动跳回这张地图并定位到对应区域；后续新增细数据时继续接入同一张地图。
+      <b>说明：</b>缺少区县独立数据的区域会沿用所属城市均价作为底色和标签，详情面板会标注对应口径。
     `,
   });
   fs.writeFileSync(OUT_HTML, html, "utf8");

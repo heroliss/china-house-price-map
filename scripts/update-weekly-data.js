@@ -196,6 +196,12 @@ async function main() {
   if (chinaResult.status !== 0) process.exit(chinaResult.status || 1);
 
   if (shouldGenerate) {
+    const geoResult = spawnSync(process.execPath, [path.join(ROOT, "scripts", "update-china-geo.js")], {
+      cwd: ROOT,
+      stdio: "inherit",
+    });
+    if (geoResult.status !== 0) process.exit(geoResult.status || 1);
+
     const result = spawnSync(process.execPath, [path.join(ROOT, "generate_all_maps.js"), ROOT], {
       cwd: ROOT,
       stdio: "inherit",
