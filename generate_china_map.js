@@ -33,6 +33,23 @@ const COLORS = ["#2b6cb0", "#4fa3c8", "#8fd0d0", "#f2e6a7", "#f3a05f", "#d95845"
 const BREAKS = [0, 8000, 12000, 18000, 30000, 50000, 80000, 120000, 180000];
 
 const MUNICIPALITIES = new Set(["110000", "120000", "310000", "500000", "710000", "810000", "820000"]);
+const DETAIL_TOLERANCE_BY_PROVINCE = {
+  "440000": 0.05,
+  "810000": 0.015,
+  "820000": 0.003,
+};
+
+const townAliases = {
+  "东莞|南城街道": "南城区",
+  "东莞|东城街道": "东城区",
+  "东莞|万江街道": "万江区",
+  "中山|东区街道": "东区",
+  "中山|西区街道": "西区",
+  "中山|南区街道": "南区",
+  "中山|石岐街道": "石岐区",
+  "中山|南朗街道": "南朗镇",
+  "中山|中山港街道": "火炬开发区",
+};
 
 const VIEW_PRESETS = [
   { id: "national", label: "全国", center: [104, 35.5], scale: 0.9 },
@@ -105,6 +122,69 @@ function createLayerPayload(id, features, outlines, projection, getRecord, toler
 function writeDetailLayer(filename, payload) {
   fs.mkdirSync(LAYER_DIR, { recursive: true });
   fs.writeFileSync(path.join(LAYER_DIR, filename), `${JSON.stringify(payload)}\n`, "utf8");
+}
+
+function townDisplayName(city, osmName) {
+  return townAliases[`${city}|${osmName}`] || osmName;
+}
+
+function pointKey(pt) {
+  return `${pt[0].toFixed(7)},${pt[1].toFixed(7)}`;
+}
+
+function stitchRings(segments) {
+  const unused = segments
+    .filter(seg => seg.length > 1)
+    .map(seg => seg.map(pt => [pt[0], pt[1]]));
+  const rings = [];
+  while (unused.length) {
+    const ring = unused.shift();
+    let guard = 0;
+    while (unused.length && guard++ < 600) {
+      const end = pointKey(ring[ring.length - 1]);
+      if (end === pointKey(ring[0])) break;
+      const index = unused.findIndex(seg => pointKey(seg[0]) === end || pointKey(seg[seg.length - 1]) === end);
+      if (index === -1) break;
+      const next = unused.splice(index, 1)[0];
+      if (pointKey(next[next.length - 1]) === end) next.reverse();
+      ring.push(...next.slice(1));
+    }
+    if (ring.length > 2) {
+      if (pointKey(ring[0]) !== pointKey(ring[ring.length - 1])) ring.push(ring[0]);
+      rings.push(ring);
+    }
+  }
+  return rings;
+}
+
+function readOsmTownBoundaries(city, file) {
+  const sourcePath = path.join(ROOT, file);
+  if (!fs.existsSync(sourcePath)) return [];
+  const osm = readGeo(sourcePath);
+  return osm.elements
+    .filter(el => el.type === "relation" && el.tags?.boundary === "administrative" && el.tags?.admin_level === "8")
+    .map(el => {
+      const segments = el.members
+        .filter(member => member.type === "way" && member.role === "outer" && Array.isArray(member.geometry))
+        .map(member => member.geometry.map(point => [point.lon, point.lat]));
+      const rings = stitchRings(segments);
+      if (!rings.length) return null;
+      const name = townDisplayName(city, el.tags.name);
+      const labelNode = el.members.find(member => member.role === "label" && Number.isFinite(member.lon) && Number.isFinite(member.lat));
+      return {
+        type: "Feature",
+        properties: {
+          adcode: el.id,
+          city,
+          name,
+          sourceName: el.tags.name,
+          level: "town",
+          centroid: labelNode ? [labelNode.lon, labelNode.lat] : undefined,
+        },
+        geometry: { type: "MultiPolygon", coordinates: rings.map(ring => [ring]) },
+      };
+    })
+    .filter(Boolean);
 }
 
 function withPlace(feature, province, city, name, extra = {}) {
@@ -184,6 +264,12 @@ function loadProvinceDetailFeatures(provinceName, provinceCode) {
   if (!fs.existsSync(provinceFull)) return { features: [], outlines: [] };
 
   const geo = readGeo(provinceFull);
+  const townBoundaryFiles = provinceCode === "440000"
+    ? new Map([
+      ["东莞市", "osm_dongguan_boundaries.json"],
+      ["中山市", "osm_zhongshan_boundaries.json"],
+    ])
+    : new Map();
   if (MUNICIPALITIES.has(provinceCode)) {
     return {
       features: (geo.features || []).map(feature => withPlace(feature, provinceName, provinceName, feature.properties?.name || provinceName)),
@@ -199,6 +285,18 @@ function loadProvinceDetailFeatures(provinceName, provinceCode) {
     const cityCode = props.adcode;
     if (!cityName || !cityCode) continue;
     outlines.push(withPlace(cityFeature, provinceName, provinceName, cityName));
+
+    const townBoundaryFile = townBoundaryFiles.get(cityName);
+    if (townBoundaryFile) {
+      const shortCityName = cityName.replace(/市$/, "");
+      const townFeatures = readOsmTownBoundaries(shortCityName, townBoundaryFile);
+      if (townFeatures.length) {
+        townFeatures.forEach(part => {
+          detailFeatures.push(withPlace(part, provinceName, cityName, part.properties?.name || cityName));
+        });
+        continue;
+      }
+    }
 
     const fullPath = cityGeoPath(cityCode, "_full");
     if (!fullPath) {
@@ -225,7 +323,7 @@ function buildProvinceDetailLayers(projection, data) {
     const { features, outlines } = loadProvinceDetailFeatures(provinceName, provinceCode);
     if (!features.length) return null;
     const id = `province-${provinceCode}`;
-    const payload = createLayerPayload(id, features, outlines, projection, getRecord, 0.1);
+    const payload = createLayerPayload(id, features, outlines, projection, getRecord, DETAIL_TOLERANCE_BY_PROVINCE[provinceCode] ?? 0.14);
     if (!payload.regions.length) return null;
     const file = `${id}.json`;
     writeDetailLayer(file, payload);
@@ -266,7 +364,8 @@ function main() {
     features,
     outlines,
     getRecord,
-    maxScale: 80,
+    maxScale: 180,
+    maxDetailLoadsPerPass: 3,
     showPresetButtons: false,
     viewPresets: VIEW_PRESETS,
     detailSources: detailLayers.map(layer => ({
