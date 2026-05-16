@@ -1161,6 +1161,7 @@ const interactiveHtml = `<!doctype html>
 const regions = ${JSON.stringify(interactiveRegions)};
 const points = ${JSON.stringify(interactivePoints)};
 const places = regions.concat(points);
+const placeById = new Map(places.map(place => [place.id, place]));
 const cityStats = ${JSON.stringify(cityStats)};
 const hkStats = ${JSON.stringify(hkStats)};
 const macauStats = ${JSON.stringify(macauStats)};
@@ -1179,17 +1180,34 @@ const tooltip = document.getElementById('tooltip');
 const selected = document.getElementById('selected');
 const rows = document.getElementById('rows');
 const search = document.getElementById('search');
+const cityLabels = document.getElementById('cityLabels');
+const regionEls = Array.from(document.querySelectorAll('.region'));
+const pointEls = Array.from(document.querySelectorAll('.townPoint'));
+const labelEls = Array.from(document.querySelectorAll('.detailLabel, .cityLabel')).map(el => ({
+  el,
+  x: Number(el.getAttribute('x')),
+  y: Number(el.getAttribute('y')),
+}));
+const detailLabelEls = Array.from(document.querySelectorAll('.detailLabel')).map(el => ({
+  el,
+  minScale: Number(el.dataset.minScale || 2.2),
+}));
+const sortButtons = Array.from(document.querySelectorAll('.sortBar button'));
+const collator = new Intl.Collator('zh-Hans-CN');
 let state = { scale: 1, x: 0, y: 0 };
 let dragging = false;
 let last = null;
 let activePointers = new Map();
 let pinch = null;
+let tapCandidate = null;
 let activeId = null;
 let labelsVisible = true;
 let sortMode = 'priceDesc';
 let tilesVisible = false;
 let overlayOpacity = Number(overlayOpacityInput.value) / 100;
 let labelScale = Number(labelScaleInput.value) / 100;
+let lastTileKey = '';
+let rowEls = [];
 const minScale = 0.7;
 const maxScale = 12;
 const projection = {
@@ -1221,7 +1239,6 @@ function applyResponsiveSvgMode() {
   svg.setAttribute('preserveAspectRatio', window.matchMedia('(max-width: 760px)').matches ? 'xMidYMid slice' : 'xMidYMid meet');
 }
 function applyCityLabelVisibility() {
-  const cityLabels = document.getElementById('cityLabels');
   cityLabels.style.display = labelsVisible && state.scale < 2.55 ? '' : 'none';
 }
 function clientToSvg(clientX, clientY) {
@@ -1334,7 +1351,10 @@ function visibleContentBounds() {
 }
 function updateTiles() {
   if (!tilesVisible) {
-    tileLayer.innerHTML = '';
+    if (lastTileKey) {
+      tileLayer.innerHTML = '';
+      lastTileKey = '';
+    }
     return;
   }
   const b = visibleContentBounds();
@@ -1353,9 +1373,16 @@ function updateTiles() {
     y0 = latToTileY(north, z); y1 = latToTileY(south, z);
   }
   const n = Math.pow(2, z);
+  const xStart = Math.max(0, x0 - 1);
+  const xEnd = Math.min(n - 1, x1 + 1);
+  const yStart = Math.max(0, y0 - 1);
+  const yEnd = Math.min(n - 1, y1 + 1);
+  const tileKey = [z, xStart, xEnd, yStart, yEnd].join(':');
+  if (tileKey === lastTileKey) return;
+  lastTileKey = tileKey;
   const tiles = [];
-  for (let x = Math.max(0, x0 - 1); x <= Math.min(n - 1, x1 + 1); x++) {
-    for (let y = Math.max(0, y0 - 1); y <= Math.min(n - 1, y1 + 1); y++) {
+  for (let x = xStart; x <= xEnd; x++) {
+    for (let y = yStart; y <= yEnd; y++) {
       const lon1 = tileXToLon(x, z);
       const lon2 = tileXToLon(x + 1, z);
       const lat1 = tileYToLat(y, z);
@@ -1371,14 +1398,11 @@ function applyTransform() {
   clampPan();
   viewport.setAttribute('transform', 'translate(' + state.x + ' ' + state.y + ') scale(' + state.scale + ')');
   const inverse = 1 / state.scale;
-  document.querySelectorAll('.detailLabel, .cityLabel').forEach(label => {
-    const x = Number(label.getAttribute('x'));
-    const y = Number(label.getAttribute('y'));
-    label.setAttribute('transform', 'translate(' + x + ' ' + y + ') scale(' + inverse + ') translate(' + -x + ' ' + -y + ')');
+  labelEls.forEach(label => {
+    label.el.setAttribute('transform', 'translate(' + label.x + ' ' + label.y + ') scale(' + inverse + ') translate(' + -label.x + ' ' + -label.y + ')');
   });
-  document.querySelectorAll('.detailLabel').forEach(label => {
-    const min = Number(label.dataset.minScale || 2.2);
-    label.style.display = state.scale >= min ? 'block' : 'none';
+  detailLabelEls.forEach(label => {
+    label.el.style.display = state.scale >= label.minScale ? 'block' : 'none';
   });
   applyCityLabelVisibility();
   updateTiles();
@@ -1426,6 +1450,7 @@ function beginPinch() {
     pinch = null;
     return;
   }
+  tapCandidate = null;
   const center = pointerMidpoint(points[0], points[1]);
   const anchor = clientToSvg(center.clientX, center.clientY);
   pinch = {
@@ -1435,6 +1460,9 @@ function beginPinch() {
   };
 }
 function endPointer(event) {
+  const candidate = tapCandidate && tapCandidate.pointerId === event.pointerId ? tapCandidate : null;
+  const isTap = !!(candidate && candidate.id && activePointers.size === 1 && !candidate.moved &&
+    Math.hypot(event.clientX - candidate.clientX, event.clientY - candidate.clientY) <= 7);
   if (activePointers.has(event.pointerId)) {
     activePointers.delete(event.pointerId);
     if (svg.releasePointerCapture) {
@@ -1451,14 +1479,18 @@ function endPointer(event) {
     pinch = null;
     svg.classList.remove('dragging');
   }
+  if (candidate) {
+    tapCandidate = null;
+    if (isTap) selectRegion(candidate.id);
+  }
 }
 function selectRegion(id, center = false) {
   activeId = id;
   hideTip();
-  document.querySelectorAll('.region').forEach(el => el.classList.toggle('active', el.id === id));
-  document.querySelectorAll('.townPoint').forEach(el => el.classList.toggle('active', el.id === id));
-  document.querySelectorAll('.row').forEach(el => el.classList.toggle('active', el.dataset.id === id));
-  const r = places.find(item => item.id === id);
+  regionEls.forEach(el => el.classList.toggle('active', el.id === id));
+  pointEls.forEach(el => el.classList.toggle('active', el.id === id));
+  rowEls.forEach(el => el.classList.toggle('active', el.dataset.id === id));
+  const r = placeById.get(id);
   if (!r) return;
   setSelectedHighlight(r);
   setHoverHighlight(null);
@@ -1486,8 +1518,8 @@ function showTip(event, r) {
     (r.price ? '<span>' + fmt(r.price) + ' 元/㎡ · 约 ' + fmtWan(r.price) + ' · 环比 ' + r.mom + sourceLine + '</span>' : !['香港', '澳门'].includes(r.city) ? '<span>暂无单列房价数据，已单列边界</span>' : '<span>暂无可比房价估算</span>');
 }
 function hideTip() { tooltip.style.display = 'none'; }
-document.querySelectorAll('.region').forEach(el => {
-  const r = places.find(item => item.id === el.id);
+regionEls.forEach(el => {
+  const r = placeById.get(el.id);
   el.addEventListener('mousemove', event => {
     setHoverHighlight(r);
     showTip(event, r);
@@ -1496,13 +1528,11 @@ document.querySelectorAll('.region').forEach(el => {
     setHoverHighlight(null);
     hideTip();
   });
-  el.addEventListener('click', () => selectRegion(el.id));
 });
-document.querySelectorAll('.townPoint').forEach(el => {
-  const r = places.find(item => item.id === el.id);
+pointEls.forEach(el => {
+  const r = placeById.get(el.id);
   el.addEventListener('mousemove', event => showTip(event, r));
   el.addEventListener('mouseleave', hideTip);
-  el.addEventListener('click', () => selectRegion(el.id));
 });
 svg.addEventListener('wheel', event => {
   event.preventDefault();
@@ -1512,6 +1542,14 @@ svg.addEventListener('pointerdown', event => {
   if (event.pointerType === 'mouse' && event.button !== 0) return;
   event.preventDefault();
   if (svg.setPointerCapture) svg.setPointerCapture(event.pointerId);
+  const target = event.target.closest ? event.target.closest('.region, .townPoint') : null;
+  tapCandidate = target ? {
+    id: target.id,
+    pointerId: event.pointerId,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    moved: false,
+  } : null;
   activePointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
   if (activePointers.size >= 2) {
     dragging = false;
@@ -1526,8 +1564,13 @@ window.addEventListener('pointermove', event => {
   if (activePointers.has(event.pointerId)) {
     activePointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
   }
+  if (tapCandidate && tapCandidate.pointerId === event.pointerId &&
+      Math.hypot(event.clientX - tapCandidate.clientX, event.clientY - tapCandidate.clientY) > 7) {
+    tapCandidate.moved = true;
+  }
   if (activePointers.size >= 2) {
     event.preventDefault();
+    tapCandidate = null;
     const points = [...activePointers.values()];
     const center = pointerMidpoint(points[0], points[1]);
     const anchor = clientToSvg(center.clientX, center.clientY);
@@ -1582,7 +1625,6 @@ function momValue(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 function sortPlaces(list) {
-  const collator = new Intl.Collator('zh-Hans-CN');
   return list.sort((a, b) => {
     if (sortMode === 'priceAsc') return a.price - b.price;
     if (sortMode === 'momDesc') return momValue(b.mom) - momValue(a.mom);
@@ -1599,24 +1641,25 @@ function renderRows(filter = '') {
     .filter(r => !q || (r.city + r.name).toLowerCase().includes(q)));
   rows.innerHTML = main.map(r => '<div class="row" data-id="' + r.id + '">' +
     '<b>' + r.city + ' ' + r.name + (r.supplemental ? '<span class="sourceMark">※</span>' : '') + '</b><span class="price">' + fmt(r.price) + '</span><span class="' + (String(r.mom).startsWith('+') ? 'up' : String(r.mom).startsWith('-') ? 'down' : '') + '">' + r.mom + '</span></div>').join('');
-  rows.querySelectorAll('.row').forEach(row => {
+  rowEls = Array.from(rows.querySelectorAll('.row'));
+  rowEls.forEach(row => {
     row.onclick = () => selectRegion(row.dataset.id, true);
   });
-  document.querySelectorAll('.region').forEach(el => {
-    const r = places.find(item => item.id === el.id);
+  regionEls.forEach(el => {
+    const r = placeById.get(el.id);
     const match = !q || (r.city + r.name).toLowerCase().includes(q);
     el.classList.toggle('dimmed', !match);
   });
-  document.querySelectorAll('.townPoint').forEach(el => {
-    const r = places.find(item => item.id === el.id);
+  pointEls.forEach(el => {
+    const r = placeById.get(el.id);
     const match = !q || (r.city + r.name).toLowerCase().includes(q);
     el.classList.toggle('dimmed', !match);
   });
 }
-document.querySelectorAll('.sortBar button').forEach(button => {
+sortButtons.forEach(button => {
   button.addEventListener('click', () => {
     sortMode = button.dataset.sort;
-    document.querySelectorAll('.sortBar button').forEach(item => item.classList.toggle('active', item === button));
+    sortButtons.forEach(item => item.classList.toggle('active', item === button));
     renderRows(search.value);
   });
 });
