@@ -9,6 +9,8 @@ const {
   bestLabelPoint,
   cleanName,
   colorFor,
+  pathBounds,
+  mergeBounds,
   geomToSimplifiedPath,
 } = require("./src/simple_map_core");
 const {
@@ -91,6 +93,7 @@ function createLayerPayload(id, features, outlines, projection, getRecord, toler
     const price = record?.price || null;
     const [cx, cy, labelBox] = bestLabelPoint(feature, projection.project);
     const label = cleanName(name);
+    const d = geomToSimplifiedPath(feature.geometry, projection.project, tolerance);
     return {
       id: `${id}-${index}`,
       city,
@@ -101,7 +104,8 @@ function createLayerPayload(id, features, outlines, projection, getRecord, toler
       source: record?.source || "",
       quality: record?.quality || "",
       supplemental: Boolean(record?.supplemental),
-      d: geomToSimplifiedPath(feature.geometry, projection.project, tolerance),
+      d,
+      bounds: pathBounds(d),
       fill: colorFor(price, BREAKS, COLORS),
       cx,
       cy,
@@ -110,7 +114,7 @@ function createLayerPayload(id, features, outlines, projection, getRecord, toler
   });
   return {
     id,
-    bounds: regionBounds(regions),
+    bounds: mergeBounds(regions) || regionBounds(regions),
     regions,
     outlines: outlines.map((feature, index) => ({
       id: `${id}-b${index}`,
@@ -371,8 +375,8 @@ function main() {
     detailSources: detailLayers.map(layer => ({
       id: layer.id,
       url: `data/layers/${layer.file}`,
-      minScale: 4.2,
-      labelScale: 5.2,
+      minScale: 5.6,
+      labelScale: 6.2,
       bounds: layer.bounds,
     })),
     notesHtml: `
