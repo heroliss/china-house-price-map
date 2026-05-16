@@ -4,7 +4,7 @@ const outputDir = process.argv[2] ? path.resolve(process.argv[2]) : __dirname;
 const OUT_SVG = path.join(outputDir, "gba_house_price_map_2026_04.svg");
 const OUT_PNG = path.join(outputDir, "gba_house_price_map_2026_04.png");
 const OUT_HTML = path.join(outputDir, "gba_house_price_map_2026_04.html");
-const OUT_INTERACTIVE = path.join(outputDir, "index.html");
+const OUT_INTERACTIVE = path.join(outputDir, "gba.html");
 
 const cityFiles = [
   ["广州", "datav_440100_full.json"],
@@ -1078,7 +1078,8 @@ const interactiveHtml = `<!doctype html>
       <p class="updateLine">内地数据：${esc(mainlandPeriodText)}；最近抓取：${esc(fetchedAtText)}</p>
     </header>
     <div class="toolbar">
-      <a class="mapNav active" href="index.html" data-short="大湾区">大湾区</a>
+      <a class="mapNav" href="index.html" data-short="全国">全国</a>
+      <a class="mapNav active" href="gba.html" data-short="大湾区">大湾区</a>
       <a class="mapNav" href="jingjinji.html" data-short="京津冀">京津冀</a>
       <button id="zoomIn" data-short="+">放大</button>
       <button id="zoomOut" data-short="-">缩小</button>

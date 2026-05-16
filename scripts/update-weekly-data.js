@@ -189,6 +189,12 @@ async function main() {
   });
   if (jjjResult.status !== 0) process.exit(jjjResult.status || 1);
 
+  const chinaResult = spawnSync(process.execPath, [path.join(ROOT, "scripts", "update-china-data.js")], {
+    cwd: ROOT,
+    stdio: "inherit",
+  });
+  if (chinaResult.status !== 0) process.exit(chinaResult.status || 1);
+
   if (shouldGenerate) {
     const result = spawnSync(process.execPath, [path.join(ROOT, "generate_all_maps.js"), ROOT], {
       cwd: ROOT,

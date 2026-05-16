@@ -79,8 +79,8 @@
 <body>
 <main class="app">
   <section class="mapShell">
-    <header><h1>京津冀房价地图</h1><p>拖拽移动，滚轮或双指缩放；点击区县查看详细数据</p><p>数据：2026年4月挂牌 / 2026年4月；最近抓取：2026-05-16 20:55 北京时间</p></header>
-    <div class="toolbar"><a class="mapNav" href="index.html" data-short="大湾区">大湾区</a><a class="mapNav active" href="jingjinji.html" data-short="京津冀">京津冀</a><button id="zoomIn">+</button><button id="zoomOut">-</button><button id="reset">重置</button><button id="toggleLabels">文字</button><button id="toggleTiles">底图</button></div>
+    <header><h1>京津冀房价地图</h1><p>拖拽移动，滚轮或双指缩放；点击区县查看详细数据</p><p>数据：2026年4月挂牌 / 2026年4月；最近抓取：2026-05-16 21:19 北京时间</p></header>
+    <div class="toolbar"><a class="mapNav" href="index.html" data-short="全国">全国</a><a class="mapNav" href="gba.html" data-short="大湾区">大湾区</a><a class="mapNav active" href="jingjinji.html" data-short="京津冀">京津冀</a><button id="zoomIn">+</button><button id="zoomOut">-</button><button id="reset">重置</button><button id="toggleLabels">文字</button><button id="toggleTiles">底图</button></div>
     <div class="overlayControl"><label for="overlayOpacity">房价图层</label><input id="overlayOpacity" type="range" min="0" max="100" value="20"><span id="overlayOpacityValue">20%</span></div>
     <svg id="map" viewBox="226.61 122.80 870.78 1102.40" preserveAspectRatio="xMidYMid meet">
       <g id="viewport">
@@ -104,7 +104,7 @@
     <div id="selected" class="selected"><div class="name">点击或悬停地图区域</div><div class="meta">可查看房价、环比和数据口径。</div></div>
     <div id="rows" class="rows"></div>
     <div class="notes">
-      <b>更新：</b>GitHub Actions 每周一 04:00（北京时间）尝试拉取数据；页面生成 2026-05-16 20:55 北京时间。<br>
+      <b>更新：</b>GitHub Actions 每周一 04:00（北京时间）尝试拉取数据；页面生成 2026-05-16 21:20 北京时间。<br>
       <b>口径：</b>北京、天津使用禧泰数据/中国房价行情区县住宅挂牌均价；河北目前抓取源区县行不完整，先用城市住宅挂牌均价为区县着色，列表中同市区县数值相同属正常。<br>
       <b>边界：</b>白线为区县/县级边界，深色线为城市范围；底图为高德中文瓦片，可开启并调整房价图层透明度。
     </div>

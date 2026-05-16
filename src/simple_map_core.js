@@ -110,6 +110,64 @@ function geomToPath(geom, project) {
   return d;
 }
 
+function perpendicularDistance(point, start, end) {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  if (!dx && !dy) return Math.hypot(point[0] - start[0], point[1] - start[1]);
+  return Math.abs(dy * point[0] - dx * point[1] + end[0] * start[1] - end[1] * start[0]) / Math.hypot(dx, dy);
+}
+
+function simplifyLine(points, tolerance) {
+  if (points.length <= 2) return points;
+  let maxDistance = 0;
+  let splitIndex = 0;
+  const start = points[0];
+  const end = points[points.length - 1];
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const distance = perpendicularDistance(points[i], start, end);
+    if (distance > maxDistance) {
+      maxDistance = distance;
+      splitIndex = i;
+    }
+  }
+  if (maxDistance <= tolerance) return [start, end];
+  return simplifyLine(points.slice(0, splitIndex + 1), tolerance)
+    .slice(0, -1)
+    .concat(simplifyLine(points.slice(splitIndex), tolerance));
+}
+
+function simplifyRingSequential(points, tolerance) {
+  if (points.length <= 8) return points;
+  const simplified = [points[0]];
+  for (let i = 1; i < points.length; i += 1) {
+    const previous = simplified[simplified.length - 1];
+    const point = points[i];
+    if (Math.hypot(point[0] - previous[0], point[1] - previous[1]) >= tolerance) simplified.push(point);
+  }
+  return simplified.length >= 3 ? simplified : points;
+}
+
+function geomToSimplifiedPath(geom, project, tolerance = 0) {
+  if (!tolerance) return geomToPath(geom, project);
+  const polygons = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
+  let d = "";
+  for (const poly of polygons) {
+    for (const ring of poly) {
+      const projected = ring.map(project);
+      const hasClosingPoint = projected.length > 2
+        && Math.hypot(projected[0][0] - projected[projected.length - 1][0], projected[0][1] - projected[projected.length - 1][1]) < 1e-6;
+      const openRing = hasClosingPoint ? projected.slice(0, -1) : projected;
+      const simplified = simplifyRingSequential(openRing, tolerance);
+      const points = simplified.length >= 3 ? simplified : openRing;
+      points.forEach(([x, y], index) => {
+        d += `${index ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`;
+      });
+      d += "Z";
+    }
+  }
+  return d;
+}
+
 function signedArea(points) {
   let sum = 0;
   for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
@@ -226,6 +284,7 @@ function createInteractiveMap(config) {
   const breaks = config.breaks || DEFAULT_BREAKS;
   const features = config.features;
   const outlines = config.outlines || [];
+  const pathSimplifyTolerance = config.pathSimplifyTolerance || 0;
   const projection = buildProjection(features, mapBox);
   const mapViewPadding = 82;
   const mapViewBox = {
@@ -250,14 +309,14 @@ function createInteractiveMap(config) {
       source: record?.source || "",
       quality: record?.quality || "",
       supplemental: Boolean(record?.supplemental),
-      d: geomToPath(feature.geometry, projection.project),
+      d: geomToSimplifiedPath(feature.geometry, projection.project, pathSimplifyTolerance),
       fill: colorFor(price, breaks, colors),
       cx,
       cy,
       labelMinScale: Number(Math.max(1.8, Math.min(5.2, ((label.length + 5) * 7) / Math.max(10, Math.min(labelBox.w, labelBox.h * 2)))).toFixed(2)),
     };
   });
-  const cityBoundaries = outlines.map((feature, index) => ({ id: `c${index}`, d: geomToPath(feature.geometry, projection.project) }));
+  const cityBoundaries = outlines.map((feature, index) => ({ id: `c${index}`, d: geomToSimplifiedPath(feature.geometry, projection.project, pathSimplifyTolerance) }));
   const cityLabels = Object.entries(config.labelCenters || {}).map(([label, coord]) => {
     const [x, y] = projection.project(coord);
     return { label, x: Number(x.toFixed(1)), y: Number(y.toFixed(1)) };

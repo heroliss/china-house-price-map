@@ -121,7 +121,8 @@ function main() {
     labelCenters: cityCenters,
     getRecord: createRecordGetter(data),
     navLinks: [
-      { href: "index.html", label: "大湾区" },
+      { href: "index.html", label: "全国" },
+      { href: "gba.html", label: "大湾区" },
       { href: "jingjinji.html", label: "京津冀", active: true },
     ],
     notesHtml: `
