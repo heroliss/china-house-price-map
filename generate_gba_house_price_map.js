@@ -640,9 +640,14 @@ let svg = `<?xml version="1.0" encoding="UTF-8"?>
 `;
 
 for (const f of features) {
-  const key = `${f.properties.city}|${f.properties.name}`;
   const record = getPriceRecord(f.properties.city, f.properties.name);
-  svg += `<path d="${geomToPath(f.geometry)}" fill="${colorFor(record?.price)}" stroke="#ffffff" stroke-width="1.15" opacity="${record ? 0.96 : 0.64}"/>`;
+  const fill = colorFor(record?.price);
+  svg += `<path d="${geomToPath(f.geometry)}" fill="${fill}" stroke="${fill}" stroke-width="2.4" opacity="${record ? 0.96 : 0.64}"/>`;
+}
+
+for (const f of features) {
+  const record = getPriceRecord(f.properties.city, f.properties.name);
+  svg += `<path d="${geomToPath(f.geometry)}" fill="${colorFor(record?.price)}" stroke="#ffffff" stroke-width=".9" opacity="${record ? 0.96 : 0.64}"/>`;
 }
 
 for (const f of cityOutlineFeatures) {
@@ -823,9 +828,11 @@ const interactiveHtml = `<!doctype html>
   button.active { border-color: #2f89a6; background: #edf7f6; color: #1f6677; font-weight: 800; }
   svg { width: 100%; height: calc(100vh - 48px); display: block; cursor: grab; touch-action: none; user-select: none; }
   svg.dragging { cursor: grabbing; }
-  .region { stroke: #fff; stroke-width: 1.2; vector-effect: non-scaling-stroke; transition: opacity .15s, stroke-width .15s, filter .15s, fill-opacity .15s; }
+  .regionSeal { stroke-width: 2.8; pointer-events: none; opacity: .98; }
+  .region { stroke: rgba(255,255,255,.92); stroke-width: .85; vector-effect: non-scaling-stroke; transition: opacity .15s, stroke-width .15s, filter .15s, fill-opacity .15s; }
   .region:hover, .region.active { stroke: #102a33; stroke-width: 2.8; filter: drop-shadow(0 5px 8px rgba(25,55,65,.25)); }
-  .mapTilesOn .region { fill-opacity: var(--overlay-opacity); stroke-opacity: .88; }
+  .mapTilesOn .region, .mapTilesOn .regionSeal { fill-opacity: var(--overlay-opacity); stroke-opacity: var(--overlay-opacity); }
+  .mapTilesOn .region { stroke-opacity: .86; }
   .mapTilesOn .cityLabel, .mapTilesOn .detailLabel { stroke: rgba(255,255,255,.95); }
   .cityBoundary { fill: none; stroke: #153f49; stroke-width: 2.1; vector-effect: non-scaling-stroke; pointer-events: none; opacity: .7; }
   .mapTilesOn .cityBoundary { stroke-opacity: .86; }
@@ -956,34 +963,60 @@ const interactiveHtml = `<!doctype html>
     .side { max-height: none; }
   }
   @media (max-width: 760px) {
-    .app { padding: 8px; gap: 10px; }
-    .mapShell { min-height: 72svh; border-radius: 10px; }
-    header { left: 12px; right: 12px; top: 12px; }
-    h1 { font-size: 23px; line-height: 1.15; }
-    header p { margin-top: 5px; font-size: 12px; line-height: 1.35; max-width: calc(100vw - 48px); }
-    header .updateLine { font-size: 11px; }
+    .app { padding: 6px; gap: 8px; }
+    .mapShell { min-height: 82svh; border-radius: 10px; }
+    header {
+      left: 8px;
+      right: auto;
+      top: 8px;
+      max-width: calc(100% - 98px);
+      padding: 7px 9px;
+      border: 1px solid rgba(219,230,227,.9);
+      border-radius: 10px;
+      background: rgba(255,255,255,.72);
+      backdrop-filter: blur(8px);
+    }
+    h1 { font-size: 17px; line-height: 1.1; }
+    header p { display: none; }
     .toolbar {
-      left: 12px;
-      right: 12px;
-      top: 96px;
-      justify-content: flex-start;
-      flex-wrap: wrap;
-      gap: 6px;
+      left: auto;
+      right: 8px;
+      top: 8px;
+      display: grid;
+      grid-template-columns: repeat(2, 36px);
+      gap: 5px;
     }
     button { height: 32px; padding: 0 9px; font-size: 13px; }
+    .toolbar button { width: 36px; padding: 0; font-size: 0; border-radius: 9px; }
+    .toolbar button::after { content: attr(data-short); font-size: 14px; font-weight: 800; }
+    .toolbar #toggleTiles { width: 77px; grid-column: 1 / 3; }
+    .toolbar #toggleTiles::after { font-size: 13px; }
     .overlayControl {
-      left: 12px;
-      right: 12px;
-      top: 168px;
+      left: 8px;
+      right: 8px;
+      top: auto;
+      bottom: 80px;
       width: auto;
+      padding: 6px 8px;
+      font-size: 11px;
     }
-    svg { height: 72svh; }
-    .legend { left: 12px; bottom: 12px; padding: 10px; border-radius: 10px; max-width: calc(100vw - 40px); }
-    .swatch { width: 36px; }
-    .legendLabels { grid-template-columns: repeat(${colors.length}, 36px); gap: 5px; font-size: 9px; }
-    .tileAttribution { right: 12px; bottom: 10px; font-size: 10px; }
+    svg { height: 82svh; }
+    .cityLabel { font-size: 16px; stroke-width: 4.6px; }
+    .detailLabel { font-size: 10.4px; stroke-width: 2.7px; }
+    .legend { left: 8px; right: 8px; bottom: 8px; padding: 8px; border-radius: 10px; max-width: none; }
+    .legendTitle { font-size: 12px; margin-bottom: 6px; }
+    .swatches { gap: 4px; }
+    .swatch { width: auto; flex: 1; min-width: 0; height: 12px; }
+    .legendLabels { grid-template-columns: repeat(${colors.length}, 1fr); gap: 4px; font-size: 8.4px; }
+    .tileAttribution { right: 10px; bottom: 74px; font-size: 9px; padding: 4px 6px; }
     .side { padding: 14px; border-radius: 10px; }
     .sortBar { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 430px) {
+    .toolbar {
+      left: min(285px, calc(100vw - 85px));
+      right: auto;
+    }
   }
 </style>
 </head>
@@ -996,20 +1029,23 @@ const interactiveHtml = `<!doctype html>
       <p class="updateLine">内地数据：${esc(mainlandPeriodText)}；最近抓取：${esc(fetchedAtText)}</p>
     </header>
     <div class="toolbar">
-      <button id="zoomIn">放大</button>
-      <button id="zoomOut">缩小</button>
-      <button id="reset">重置</button>
-      <button id="toggleLabels">城市名</button>
-      <button id="toggleTiles">真实地图</button>
+      <button id="zoomIn" data-short="+">放大</button>
+      <button id="zoomOut" data-short="-">缩小</button>
+      <button id="reset" data-short="重">重置</button>
+      <button id="toggleLabels" data-short="字">城市名</button>
+      <button id="toggleTiles" data-short="底图">真实地图</button>
     </div>
     <div class="overlayControl" id="overlayControl">
       <label for="overlayOpacity">房价图层</label>
       <input id="overlayOpacity" type="range" min="0" max="100" value="62">
       <span id="overlayOpacityValue">62%</span>
     </div>
-    <svg id="map" viewBox="${mapViewBox.x.toFixed(2)} ${mapViewBox.y.toFixed(2)} ${mapViewBox.w.toFixed(2)} ${mapViewBox.h.toFixed(2)}" aria-label="粤港澳大湾区房价地图">
+    <svg id="map" viewBox="${mapViewBox.x.toFixed(2)} ${mapViewBox.y.toFixed(2)} ${mapViewBox.w.toFixed(2)} ${mapViewBox.h.toFixed(2)}" preserveAspectRatio="xMidYMid meet" aria-label="粤港澳大湾区房价地图">
       <g id="viewport">
         <g id="tileLayer"></g>
+        <g id="regionSeals">
+          ${interactiveRegions.map(r => `<path class="regionSeal" d="${r.d}" fill="${r.fill}" stroke="${r.fill}"></path>`).join("\n")}
+        </g>
         ${interactiveRegions.map(r => `<path id="${r.id}" class="region" data-city="${esc(r.city)}" data-name="${esc(r.name)}" data-price="${r.price ?? ""}" data-mom="${esc(r.mom)}" data-source="${esc(r.source)}" d="${r.d}" fill="${r.fill}"></path>`).join("\n")}
         <g id="cityBoundaries">
           ${interactiveCityBoundaries.map(r => `<path id="${r.id}" class="cityBoundary" d="${r.d}"></path>`).join("\n")}
@@ -1090,6 +1126,8 @@ let labelsVisible = true;
 let sortMode = 'priceDesc';
 let tilesVisible = false;
 let overlayOpacity = Number(overlayOpacityInput.value) / 100;
+const minScale = 0.7;
+const maxScale = 12;
 const projection = {
   minX: ${minX},
   minY: ${minY},
@@ -1110,6 +1148,9 @@ function fmtWan(value) {
 function applyOverlayOpacity() {
   document.documentElement.style.setProperty('--overlay-opacity', overlayOpacity.toFixed(2));
   overlayOpacityValue.textContent = Math.round(overlayOpacity * 100) + '%';
+}
+function applyResponsiveSvgMode() {
+  svg.setAttribute('preserveAspectRatio', window.matchMedia('(max-width: 760px)').matches ? 'xMidYMid slice' : 'xMidYMid meet');
 }
 function applyCityLabelVisibility() {
   const cityLabels = document.getElementById('cityLabels');
@@ -1274,7 +1315,7 @@ function zoom(factor, clientX, clientY) {
   const rect = svg.getBoundingClientRect();
   const anchor = clientToSvg(clientX ?? (rect.left + rect.width / 2), clientY ?? (rect.top + rect.height / 2));
   const content = svgToContent(anchor);
-  const nextScale = Math.max(0.7, Math.min(7, state.scale * factor));
+  const nextScale = Math.max(minScale, Math.min(maxScale, state.scale * factor));
   state.x = anchor.x - content.x * nextScale;
   state.y = anchor.y - content.y * nextScale;
   state.scale = nextScale;
@@ -1393,7 +1434,7 @@ window.addEventListener('pointermove', event => {
     const center = pointerMidpoint(points[0], points[1]);
     const anchor = clientToSvg(center.clientX, center.clientY);
     if (!pinch) beginPinch();
-    const nextScale = Math.max(0.7, Math.min(7, pinch.scale * pointerDistance(points[0], points[1]) / pinch.distance));
+    const nextScale = Math.max(minScale, Math.min(maxScale, pinch.scale * pointerDistance(points[0], points[1]) / pinch.distance));
     state.x = anchor.x - pinch.content.x * nextScale;
     state.y = anchor.y - pinch.content.y * nextScale;
     state.scale = nextScale;
@@ -1410,6 +1451,10 @@ window.addEventListener('pointermove', event => {
 });
 window.addEventListener('pointerup', endPointer);
 window.addEventListener('pointercancel', endPointer);
+window.addEventListener('resize', () => {
+  applyResponsiveSvgMode();
+  applyTransform();
+});
 document.getElementById('zoomIn').onclick = () => zoom(1.22);
 document.getElementById('zoomOut').onclick = () => zoom(0.82);
 document.getElementById('reset').onclick = () => {
@@ -1475,6 +1520,7 @@ document.querySelectorAll('.sortBar button').forEach(button => {
 });
 search.addEventListener('input', () => renderRows(search.value));
 renderRows();
+applyResponsiveSvgMode();
 applyOverlayOpacity();
 applyTransform();
 </script>
