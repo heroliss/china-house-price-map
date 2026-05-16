@@ -781,7 +781,7 @@ const interactiveHtml = `<!doctype html>
     --line: #dbe6e3;
     --brand: #2f89a6;
     --bg: #f5faf8;
-    --overlay-opacity: .62;
+    --overlay-opacity: .20;
     --label-scale: 1.12;
   }
   * { box-sizing: border-box; }
@@ -831,10 +831,10 @@ const interactiveHtml = `<!doctype html>
   svg { width: 100%; height: calc(100vh - 48px); display: block; cursor: grab; touch-action: none; user-select: none; }
   svg.dragging { cursor: grabbing; }
   .regionSeal { stroke-width: 2.8; pointer-events: none; opacity: .98; }
-  .region { stroke: rgba(255,255,255,.92); stroke-width: .85; vector-effect: non-scaling-stroke; transition: opacity .15s, fill-opacity .15s; }
+  #priceOverlay { transition: opacity .15s; }
+  .mapTilesOn #priceOverlay { opacity: var(--overlay-opacity); }
+  .region { stroke: rgba(255,255,255,.92); stroke-width: .85; vector-effect: non-scaling-stroke; transition: opacity .15s; }
   .region:hover, .region.active { filter: none; }
-  .mapTilesOn .region, .mapTilesOn .regionSeal { fill-opacity: var(--overlay-opacity); stroke-opacity: var(--overlay-opacity); }
-  .mapTilesOn .region { stroke-opacity: .86; }
   .mapTilesOn .cityLabel, .mapTilesOn .detailLabel { stroke: rgba(255,255,255,.95); }
   .cityBoundary { fill: none; stroke: #153f49; stroke-width: 2.1; vector-effect: non-scaling-stroke; pointer-events: none; opacity: .7; }
   .mapTilesOn .cityBoundary { stroke-opacity: .86; }
@@ -1081,16 +1081,20 @@ const interactiveHtml = `<!doctype html>
     </div>
     <div class="overlayControl" id="overlayControl">
       <label for="overlayOpacity">房价图层</label>
-      <input id="overlayOpacity" type="range" min="0" max="100" value="62">
-      <span id="overlayOpacityValue">62%</span>
+      <input id="overlayOpacity" type="range" min="0" max="100" value="20">
+      <span id="overlayOpacityValue">20%</span>
     </div>
     <svg id="map" viewBox="${mapViewBox.x.toFixed(2)} ${mapViewBox.y.toFixed(2)} ${mapViewBox.w.toFixed(2)} ${mapViewBox.h.toFixed(2)}" preserveAspectRatio="xMidYMid meet" aria-label="粤港澳大湾区房价地图">
       <g id="viewport">
         <g id="tileLayer"></g>
-        <g id="regionSeals">
-          ${interactiveRegions.map(r => `<path class="regionSeal" d="${r.d}" fill="${r.fill}" stroke="${r.fill}"></path>`).join("\n")}
+        <g id="priceOverlay">
+          <g id="regionSeals">
+            ${interactiveRegions.map(r => `<path class="regionSeal" d="${r.d}" fill="${r.fill}" stroke="${r.fill}"></path>`).join("\n")}
+          </g>
+          <g id="regionLayer">
+            ${interactiveRegions.map(r => `<path id="${r.id}" class="region" data-city="${esc(r.city)}" data-name="${esc(r.name)}" data-price="${r.price ?? ""}" data-mom="${esc(r.mom)}" data-source="${esc(r.source)}" d="${r.d}" fill="${r.fill}"></path>`).join("\n")}
+          </g>
         </g>
-        ${interactiveRegions.map(r => `<path id="${r.id}" class="region" data-city="${esc(r.city)}" data-name="${esc(r.name)}" data-price="${r.price ?? ""}" data-mom="${esc(r.mom)}" data-source="${esc(r.source)}" d="${r.d}" fill="${r.fill}"></path>`).join("\n")}
         <g id="cityBoundaries">
           ${interactiveCityBoundaries.map(r => `<path id="${r.id}" class="cityBoundary" d="${r.d}"></path>`).join("\n")}
         </g>
