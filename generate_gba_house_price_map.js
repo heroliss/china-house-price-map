@@ -1027,8 +1027,8 @@ const interactiveHtml = `<!doctype html>
     h1 { font-size: 17px; line-height: 1.1; }
     header p { display: none; }
     .toolbar {
-      left: 210px;
-      right: auto;
+      left: auto;
+      right: 8px;
       top: 8px;
       width: 93px;
       display: grid;
