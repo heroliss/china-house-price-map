@@ -5,11 +5,14 @@ const path = require("path");
 const { TextDecoder } = require("util");
 
 const ROOT = path.resolve(__dirname, "..");
+const { normalizeCity, comparableRecord, clampEstimateRatio } = require(path.join(ROOT, "src", "china_map_shared"));
 const DATA_FILE = path.join(ROOT, "data", "china_house_prices.json");
 const SOURCE_URL = "https://m.creprice.cn/";
 const CITY_PAGE_CONCURRENCY = 8;
 const FANG_CITY_LIST_URL = "https://m.fang.com/city/hotcity.jsp?city=hz&burl=/fangjia";
 const FANG_PAGE_CONCURRENCY = 8;
+const CITYHOUSE_CITY_LIST_URL = "https://www.cityhouse.com.cn/city.html";
+const CITYHOUSE_PAGE_CONCURRENCY = 2;
 const MOBILE_USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148";
 
 function cleanHtml(value) {
@@ -116,6 +119,36 @@ function parseFangDistrictRows(html) {
   return rows;
 }
 
+function parseCityhouseCityCodes(html) {
+  const codes = new Map();
+  const re = /href="https?:\/\/([a-z0-9-]+)\.cityhouse\.com\.cn\/?"[^>]*>([^<]+)<\/a>/g;
+  let match;
+  while ((match = re.exec(html))) {
+    const city = cleanHtml(match[2]);
+    const key = normalizeCity(city);
+    if (key && !codes.has(key)) codes.set(key, match[1]);
+  }
+  return codes;
+}
+
+function parseCityhouseNewSummary(html) {
+  const marker = "新盘均价";
+  const index = html.indexOf(marker);
+  if (index < 0) return null;
+  const snippet = html.slice(Math.max(0, index - 160), index + 360);
+  const match = snippet.match(/<span[^>]*>([\d,.]+)<\/span>\s*([^<（(]*)[（(]([^）)]+)[）)]/);
+  if (!match) return null;
+  const raw = Number(match[1].replace(/,/g, ""));
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  const unit = cleanHtml(match[2]);
+  const price = unit.includes("万") ? Math.round(raw * 10000) : Math.round(raw);
+  return {
+    price,
+    mom: "--%",
+    period: cleanHtml(match[3]),
+  };
+}
+
 async function mapWithConcurrency(items, limit, worker) {
   const results = new Array(items.length);
   let cursor = 0;
@@ -212,6 +245,70 @@ async function fetchFangDistrictData(cityRows) {
   };
 }
 
+async function fetchCityhouseNewCityData(cityRows) {
+  const data = {};
+  const cityCounts = {};
+  const errors = [];
+  let cityCodes;
+  try {
+    const html = await fetchText(CITYHOUSE_CITY_LIST_URL, {
+      userAgent: "Mozilla/5.0 (compatible; china-house-price-map/1.0)",
+    });
+    cityCodes = parseCityhouseCityCodes(html);
+  } catch (error) {
+    errors.push({ source: "cityhouse-city-list", url: CITYHOUSE_CITY_LIST_URL, error: error.message });
+    console.warn(`Cityhouse city list skipped: ${error.message}`);
+    return { data, cityCounts, errors, cityCodeCount: 0 };
+  }
+
+  let blocked = false;
+  await mapWithConcurrency(cityRows, CITYHOUSE_PAGE_CONCURRENCY, async row => {
+    if (blocked) {
+      cityCounts[row.city] = 0;
+      return;
+    }
+    const code = cityCodes.get(normalizeCity(row.city));
+    if (!code) {
+      cityCounts[row.city] = 0;
+      return;
+    }
+    const url = `https://${code}.cityhouse.com.cn/ha/`;
+    try {
+      const html = await fetchText(url, {
+        userAgent: "Mozilla/5.0 (compatible; china-house-price-map/1.0)",
+      });
+      const summary = parseCityhouseNewSummary(html);
+      if (!summary?.price) {
+        cityCounts[row.city] = 0;
+        return;
+      }
+      data[row.city] = {
+        ...summary,
+        url,
+      };
+      cityCounts[row.city] = 1;
+      console.log(`Parsed Cityhouse new ${row.city}: ${summary.price}`);
+    } catch (error) {
+      cityCounts[row.city] = 0;
+      if (/^(403|456)\b/.test(error.message)) {
+        blocked = true;
+        errors.push({ source: "cityhouse-blocked", city: row.city, url, error: error.message });
+        console.warn(`Cityhouse new prices skipped: ${error.message}`);
+      } else {
+        errors.push({ city: row.city, url, error: error.message });
+        console.warn(`Cityhouse new price skipped for ${row.city}: ${error.message}`);
+      }
+    }
+  });
+
+  return {
+    data,
+    cityCounts,
+    errors,
+    cityCodeCount: cityCodes.size,
+  };
+}
+
 function createDistrictRecord({ price, mom, source, quality, dataLevel, supplemental, url, fetchedAt }) {
   return {
     price,
@@ -225,29 +322,114 @@ function createDistrictRecord({ price, mom, source, quality, dataLevel, suppleme
   };
 }
 
-function mergeDistrictRecords(primaryDistrictData, fangDistrictData, fetchedAt) {
+function median(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function buildCityRecords(cityRows, cityhouseNewData, fetchedAt) {
+  const cityRecords = {};
+  const ratiosByProvince = new Map();
+  const nationalRatios = [];
+  for (const row of cityRows) {
+    const newItem = cityhouseNewData[row.city];
+    const ratio = newItem?.price ? clampEstimateRatio(newItem.price / row.price) : null;
+    if (ratio) {
+      nationalRatios.push(ratio);
+      const provinceKey = normalizeCity(row.province);
+      if (!ratiosByProvince.has(provinceKey)) ratiosByProvince.set(provinceKey, []);
+      ratiosByProvince.get(provinceKey).push(ratio);
+    }
+    cityRecords[row.city] = comparableRecord({
+      price: newItem?.price || row.price,
+      mom: newItem?.mom || row.mom,
+      source: newItem ? "城市房网" : "禧泰数据/中国房价行情",
+      quality: newItem ? `城市新盘均价（${newItem.period || "公开最新"}）` : "城市住宅挂牌均价",
+      dataLevel: "city",
+      province: row.province,
+      newPrice: newItem?.price || null,
+      newSource: newItem ? "城市房网" : "",
+      newQuality: newItem ? `城市新盘均价（${newItem.period || "公开最新"}）` : "",
+      resalePrice: row.price,
+      resaleMom: row.mom,
+      resaleSource: "禧泰数据/中国房价行情",
+      resaleQuality: "城市住宅挂牌均价",
+      url: newItem?.url || "",
+      fetchedAt,
+    }, ratio || 1, ratio ? "按同城新房/二手配对样本估算" : "暂无同城新房样本，暂按 1:1 近似估算");
+  }
+
+  const provinceRatios = new Map([...ratiosByProvince].map(([province, values]) => [province, median(values)]));
+  const nationalRatio = median(nationalRatios) || 1;
+  const ratioForCity = city => {
+    const row = cityRows.find(item => item.city === city);
+    const cityRecord = row ? cityRecords[row.city] : null;
+    if (cityRecord?.newPrice && cityRecord?.resalePrice && !cityRecord.newPriceEstimated) {
+      return { ratio: clampEstimateRatio(cityRecord.newPrice / cityRecord.resalePrice), basis: "按同城新房/二手配对样本估算" };
+    }
+    const provinceRatio = row ? provinceRatios.get(normalizeCity(row.province)) : null;
+    if (provinceRatio) return { ratio: provinceRatio, basis: "按同省新房/二手配对样本估算" };
+    return {
+      ratio: nationalRatio,
+      basis: nationalRatios.length ? "按全国新房/二手配对样本估算" : "暂无新房与二手配对样本，暂按 1:1 近似估算",
+    };
+  };
+
+  return {
+    cityRecords,
+    ratioForCity,
+    cityhouseMatched: Object.keys(cityhouseNewData).length,
+    nationalRatio,
+  };
+}
+
+function createComparableDistrictRecord({ price, mom, source, quality, dataLevel, supplemental, url, fetchedAt, ratio, basis }) {
+  return comparableRecord({
+    price,
+    mom,
+    source,
+    quality,
+    dataLevel,
+    supplemental,
+    url,
+    fetchedAt,
+    resalePrice: price,
+    resaleMom: mom,
+    resaleSource: source,
+    resaleQuality: quality,
+  }, ratio, basis);
+}
+
+function mergeDistrictRecords(primaryDistrictData, fangDistrictData, fetchedAt, ratioForCity) {
   const districtData = {};
   const districtRecords = {};
   const sourceCounts = { creprice: 0, fang: 0 };
 
   for (const [key, value] of Object.entries(primaryDistrictData || {})) {
-    districtData[key] = value;
-    districtRecords[key] = createDistrictRecord({
+    const [city] = key.split("|");
+    const ratio = ratioForCity(city);
+    const record = createComparableDistrictRecord({
       price: value[0],
       mom: value[1],
       source: "禧泰数据/中国房价行情",
       quality: "区县住宅挂牌均价",
       dataLevel: "district",
       supplemental: false,
+      ratio: ratio.ratio,
+      basis: ratio.basis,
       fetchedAt,
     });
+    districtData[key] = [record.price, record.mom];
+    districtRecords[key] = record;
     sourceCounts.creprice += 1;
   }
 
   for (const [key, value] of Object.entries(fangDistrictData || {})) {
     if (districtRecords[key]) continue;
-    districtData[key] = [value.price, value.mom];
-    districtRecords[key] = createDistrictRecord({
+    const [city] = key.split("|");
+    const ratio = ratioForCity(city);
+    const record = createComparableDistrictRecord({
       price: value.price,
       mom: value.mom,
       source: "房天下查房价",
@@ -255,8 +437,12 @@ function mergeDistrictRecords(primaryDistrictData, fangDistrictData, fetchedAt) 
       dataLevel: "district-supplement",
       supplemental: true,
       url: value.url,
+      ratio: ratio.ratio,
+      basis: ratio.basis,
       fetchedAt,
     });
+    districtData[key] = [record.price, record.mom];
+    districtRecords[key] = record;
     sourceCounts.fang += 1;
   }
 
@@ -269,9 +455,11 @@ async function main() {
   if (rows.length < 250) throw new Error(`Only parsed ${rows.length} city rows from ${SOURCE_URL}`);
   const districts = await fetchDistrictData(rows);
   const fangDistricts = await fetchFangDistrictData(rows);
+  const cityhouseNew = await fetchCityhouseNewCityData(rows);
 
   const fetchedAt = new Date().toISOString();
-  const mergedDistricts = mergeDistrictRecords(districts.districtData, fangDistricts.data, fetchedAt);
+  const cityComparable = buildCityRecords(rows, cityhouseNew.data, fetchedAt);
+  const mergedDistricts = mergeDistrictRecords(districts.districtData, fangDistricts.data, fetchedAt, cityComparable.ratioForCity);
   const payload = {
     schemaVersion: 1,
     fetchedAt,
@@ -286,18 +474,29 @@ async function main() {
       districtSources: {
         creprice: mergedDistricts.sourceCounts.creprice,
         fang: mergedDistricts.sourceCounts.fang,
+        cityhouseNewCity: cityComparable.cityhouseMatched,
       },
+      defaultPriceType: "new",
+      estimateRule: cityComparable.cityhouseMatched
+        ? "优先展示真实新房/新盘均价；缺区县新房价时按同城、同省或全国新房/二手比例估算，并保留二手/挂牌参考价"
+        : "本次未抓到稳定新房样本；暂按 1:1 近似估算新房价，并保留二手/挂牌参考价",
+      newToResaleRatio: cityComparable.nationalRatio,
     },
-    cityStats: rows.map(row => [row.city, row.price, row.mom, row.province]),
+    cityStats: rows.map(row => [row.city, cityComparable.cityRecords[row.city]?.price || row.price, cityComparable.cityRecords[row.city]?.mom || row.mom, row.province]),
     cityData: rows,
+    cityRecords: cityComparable.cityRecords,
     districtData: mergedDistricts.districtData,
     districtRecords: mergedDistricts.districtRecords,
     cityDistrictCounts: districts.cityDistrictCounts,
     fangDistrictData: fangDistricts.data,
     fangCityDistrictCounts: fangDistricts.cityDistrictCounts,
     fangCityCodeCount: fangDistricts.cityCodeCount,
+    cityhouseNewCityData: cityhouseNew.data,
+    cityhouseNewCityCounts: cityhouseNew.cityCounts,
+    cityhouseCityCodeCount: cityhouseNew.cityCodeCount,
     districtFetchErrors: districts.errors,
     fangDistrictFetchErrors: fangDistricts.errors,
+    cityhouseNewFetchErrors: cityhouseNew.errors,
   };
 
   fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });

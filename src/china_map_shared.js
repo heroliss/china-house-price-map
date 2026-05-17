@@ -19,7 +19,7 @@ const TOPIC_MAPS = [
     file: "yangtze-delta.html",
     title: "长三角房价地图",
     sideTitle: "长三角城市数据",
-    caption: "上海、江苏、浙江、安徽城市级住宅挂牌均价。",
+    caption: "上海、江苏、浙江、安徽城市级新房价；缺样本时用二手/挂牌价估算。",
     provinces: ["上海", "江苏", "浙江", "安徽"],
     mapBox: { x: 100, y: 120, w: 1120, h: 1040 },
     notes: "长三角专题暂以城市级数据展示；后续可继续补区县级边界和数据。",
@@ -29,7 +29,7 @@ const TOPIC_MAPS = [
     file: "chengyu.html",
     title: "成渝地区房价地图",
     sideTitle: "成渝城市数据",
-    caption: "重庆、四川城市级住宅挂牌均价。",
+    caption: "重庆、四川城市级新房价；缺样本时用二手/挂牌价估算。",
     provinces: ["重庆", "四川"],
     mapBox: { x: 84, y: 116, w: 1160, h: 1040 },
     notes: "成渝专题暂以城市级数据展示，重庆按直辖市整体均价呈现。",
@@ -39,7 +39,7 @@ const TOPIC_MAPS = [
     file: "middle-yangtze.html",
     title: "长江中游房价地图",
     sideTitle: "长江中游城市数据",
-    caption: "湖北、湖南、江西城市级住宅挂牌均价。",
+    caption: "湖北、湖南、江西城市级新房价；缺样本时用二手/挂牌价估算。",
     provinces: ["湖北", "湖南", "江西"],
     mapBox: { x: 84, y: 116, w: 1160, h: 1040 },
     notes: "长江中游专题暂以城市级数据展示，适合快速比较武汉、长沙、南昌及周边城市。",
@@ -49,7 +49,7 @@ const TOPIC_MAPS = [
     file: "west-coast.html",
     title: "海峡西岸房价地图",
     sideTitle: "海峡西岸城市数据",
-    caption: "福建城市级住宅挂牌均价。",
+    caption: "福建城市级新房价；缺样本时用二手/挂牌价估算。",
     provinces: ["福建"],
     mapBox: { x: 110, y: 106, w: 1060, h: 1060 },
     notes: "海峡西岸专题先以福建城市级数据呈现，台湾数据源口径待补充。",
@@ -59,7 +59,7 @@ const TOPIC_MAPS = [
     file: "shandong-peninsula.html",
     title: "山东半岛房价地图",
     sideTitle: "山东半岛城市数据",
-    caption: "山东城市级住宅挂牌均价。",
+    caption: "山东城市级新房价；缺样本时用二手/挂牌价估算。",
     provinces: ["山东"],
     mapBox: { x: 90, y: 116, w: 1120, h: 1040 },
     notes: "山东半岛专题先以山东城市级数据呈现，重点观察青岛、济南、烟台、威海等城市。",
@@ -101,6 +101,82 @@ function normalizeCity(name) {
   return value;
 }
 
+const DEFAULT_NEW_TO_RESALE_RATIO = 1;
+
+function validPrice(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null;
+}
+
+function clampEstimateRatio(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_NEW_TO_RESALE_RATIO;
+  return Math.max(0.45, Math.min(2.2, parsed));
+}
+
+function inferMarketKind(record = {}) {
+  const text = `${record.priceType || ""} ${record.source || ""} ${record.quality || ""}`.toLowerCase();
+  if (/new|新房|新盘|新楼盘/.test(text)) return "new";
+  if (/resale|second|二手|挂牌/.test(text)) return "resale";
+  return "resale";
+}
+
+function comparableRecord(record = {}, ratio = DEFAULT_NEW_TO_RESALE_RATIO, basis = "") {
+  const estimateRatio = clampEstimateRatio(ratio);
+  const basePrice = validPrice(record.price);
+  const inferredKind = inferMarketKind(record);
+  let newPrice = validPrice(record.newPrice);
+  let resalePrice = validPrice(record.resalePrice);
+  let newPriceEstimated = Boolean(record.newPriceEstimated);
+  let resalePriceEstimated = Boolean(record.resalePriceEstimated);
+  const newSource = record.newSource || (!record.newPriceEstimated && inferredKind === "new" ? record.source : "");
+  const newQuality = record.newQuality || (!record.newPriceEstimated && inferredKind === "new" ? record.quality : "");
+  const resaleSource = record.resaleSource || (!record.resalePriceEstimated && inferredKind === "resale" ? record.source : "");
+  const resaleQuality = record.resaleQuality || (!record.resalePriceEstimated && inferredKind === "resale" ? record.quality : "");
+
+  if (!newPrice && basePrice && inferredKind === "new") {
+    newPrice = basePrice;
+    newPriceEstimated = false;
+  }
+  if (!resalePrice && basePrice && inferredKind === "resale") {
+    resalePrice = basePrice;
+    resalePriceEstimated = false;
+  }
+  if (!newPrice && resalePrice) {
+    newPrice = Math.round(resalePrice * estimateRatio);
+    newPriceEstimated = true;
+  }
+  if (!resalePrice && newPrice) {
+    resalePrice = Math.round(newPrice / estimateRatio);
+    resalePriceEstimated = true;
+  }
+
+  const priceType = newPrice
+    ? (newPriceEstimated ? "new-estimated" : "new")
+    : resalePrice
+      ? (resalePriceEstimated ? "resale-estimated" : "resale")
+      : "";
+  const price = newPrice || resalePrice || basePrice || null;
+
+  return {
+    ...record,
+    price,
+    priceType,
+    newPrice,
+    resalePrice,
+    newPriceEstimated,
+    resalePriceEstimated,
+    estimateRatio: Number(estimateRatio.toFixed(3)),
+    estimateBasis: record.estimateBasis || basis || (estimateRatio === 1
+      ? "暂无同区新房与二手配对样本，按 1:1 近似估算"
+      : "按同城或同省新房/二手房价比例估算"),
+    newSource,
+    newQuality,
+    resaleSource,
+    resaleQuality,
+  };
+}
+
 function specsForProvinces(provinceNames = PROVINCES.map(([name]) => name)) {
   const wanted = new Set(provinceNames.map(normalizeProvince));
   return PROVINCES.filter(([name]) => wanted.has(normalizeProvince(name))).map(([name, code]) => ({
@@ -129,16 +205,24 @@ function createPriceLookup(data) {
   const byProvinceAndCity = new Map();
   const byCity = new Map();
   const duplicateCities = new Set();
+  const cityRecords = data.cityRecords || {};
   for (const row of data.cityData || []) {
     const provinceKey = normalizeProvince(row.province);
     const cityKey = normalizeCity(row.city);
-    const record = {
+    const stored = cityRecords[row.city] || cityRecords[`${row.province}|${row.city}`];
+    const record = comparableRecord(stored || {
       price: row.price,
       mom: row.mom,
       source: "禧泰数据/中国房价行情",
       quality: "城市住宅挂牌均价",
+      resalePrice: row.price,
+      resaleMom: row.mom,
+      resaleSource: "禧泰数据/中国房价行情",
+      resaleQuality: "城市住宅挂牌均价",
+      dataLevel: "city",
       slug: row.slug,
-    };
+    }, stored?.estimateRatio || data.metadata?.newToResaleRatio || DEFAULT_NEW_TO_RESALE_RATIO);
+    record.slug = row.slug;
     byProvinceAndCity.set(`${provinceKey}|${cityKey}`, record);
     if (byCity.has(cityKey)) duplicateCities.add(cityKey);
     else byCity.set(cityKey, record);
@@ -149,7 +233,7 @@ function createPriceLookup(data) {
     ["澳门", "澳门", 60000, "估算", "澳门统计暨普查局", "住宅楼价指数折算"],
   ];
   for (const [province, city, price, mom, source, quality] of supplemental) {
-    const record = { price, mom, source, quality, supplemental: true };
+    const record = comparableRecord({ price, mom, source, quality, supplemental: true, priceType: "resale" });
     byProvinceAndCity.set(`${normalizeProvince(province)}|${normalizeCity(city)}`, record);
   }
 
@@ -171,6 +255,8 @@ module.exports = {
   TOPIC_MAPS,
   normalizeProvince,
   normalizeCity,
+  comparableRecord,
+  clampEstimateRatio,
   loadChinaFeatures,
   loadChinaOutlines,
   createPriceLookup,

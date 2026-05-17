@@ -19,6 +19,8 @@ const {
   loadChinaFeatures,
   loadChinaOutlines,
   normalizeCity,
+  comparableRecord,
+  clampEstimateRatio,
 } = require("./src/china_map_shared");
 
 const ROOT = path.resolve(__dirname);
@@ -104,6 +106,17 @@ function createLayerPayload(id, features, outlines, projection, getRecord, toler
       source: record?.source || "",
       quality: record?.quality || "",
       dataLevel: record?.dataLevel || "",
+      priceType: record?.priceType || "",
+      newPrice: record?.newPrice || null,
+      resalePrice: record?.resalePrice || null,
+      newPriceEstimated: Boolean(record?.newPriceEstimated),
+      resalePriceEstimated: Boolean(record?.resalePriceEstimated),
+      estimateRatio: record?.estimateRatio || null,
+      estimateBasis: record?.estimateBasis || "",
+      newSource: record?.newSource || "",
+      newQuality: record?.newQuality || "",
+      resaleSource: record?.resaleSource || "",
+      resaleQuality: record?.resaleQuality || "",
       inherited: Boolean(record?.inheritedCityAverage),
       supplemental: Boolean(record?.supplemental),
       d,
@@ -223,7 +236,17 @@ function buildSupplementalLookup(table, source, quality) {
   for (const [key, value] of Object.entries(table || {})) {
     const [city, area] = key.split("|");
     if (!city || !area) continue;
-    const record = { price: value[0], mom: value[1], source, quality, dataLevel: "district" };
+    const record = comparableRecord({
+      price: value[0],
+      mom: value[1],
+      source,
+      quality,
+      resalePrice: value[0],
+      resaleMom: value[1],
+      resaleSource: source,
+      resaleQuality: quality,
+      dataLevel: "district",
+    });
     exact.set(`${city}|${area}`, record);
     const normalizedKey = `${normalizeCity(city)}|${normalizeCity(area)}`;
     if (!normalized.has(normalizedKey)) normalized.set(normalizedKey, record);
@@ -235,8 +258,50 @@ function buildSupplementalLookup(table, source, quality) {
     || null;
 }
 
+function buildEstimateRatioLookup(chinaData) {
+  const byCity = new Map();
+  const byProvince = new Map();
+  const national = [];
+  const cityRowsByName = new Map((chinaData.cityData || []).map(row => [normalizeCity(row.city), row]));
+  for (const [key, raw] of Object.entries(chinaData.cityRecords || {})) {
+    const cityName = key.includes("|") ? key.split("|").pop() : key;
+    const cityKey = normalizeCity(cityName);
+    const record = comparableRecord(raw);
+    if (!record.newPrice || !record.resalePrice || record.newPriceEstimated || record.resalePriceEstimated) continue;
+    const ratio = clampEstimateRatio(record.newPrice / record.resalePrice);
+    byCity.set(cityKey, ratio);
+    national.push(ratio);
+    const province = raw.province || cityRowsByName.get(cityKey)?.province;
+    if (province) {
+      const provinceKey = normalizeCity(province);
+      if (!byProvince.has(provinceKey)) byProvince.set(provinceKey, []);
+      byProvince.get(provinceKey).push(ratio);
+    }
+  }
+  const median = values => {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  };
+  const provinceMedian = new Map([...byProvince].map(([key, values]) => [key, median(values)]));
+  const nationalMedian = median(national) || chinaData.metadata?.newToResaleRatio || 1;
+  return (city, province) => {
+    const cityRatio = byCity.get(normalizeCity(city));
+    if (cityRatio) return { ratio: cityRatio, basis: "按同城新房/二手配对样本估算" };
+    const provinceRatio = provinceMedian.get(normalizeCity(province));
+    if (provinceRatio) return { ratio: provinceRatio, basis: "按同省新房/二手配对样本估算" };
+    return {
+      ratio: nationalMedian,
+      basis: national.length
+        ? "按全国新房/二手配对样本估算"
+        : "暂无新房与二手配对样本，暂按 1:1 近似估算",
+    };
+  };
+}
+
 function buildDistrictRecordLookup(chinaData) {
   const records = chinaData.districtRecords || {};
+  const ratioFor = buildEstimateRatioLookup(chinaData);
   if (!Object.keys(records).length) {
     return buildSupplementalLookup(
       chinaData.districtData,
@@ -250,7 +315,8 @@ function buildDistrictRecordLookup(chinaData) {
   for (const [key, value] of Object.entries(records)) {
     const [city, area] = key.split("|");
     if (!city || !area || !value?.price) continue;
-    const record = {
+    const ratio = ratioFor(city, value.province || "");
+    const record = comparableRecord({
       price: value.price,
       mom: value.mom || "--%",
       source: value.source || "公开房价数据",
@@ -259,7 +325,7 @@ function buildDistrictRecordLookup(chinaData) {
       supplemental: Boolean(value.supplemental),
       url: value.url || "",
       fetchedAt: value.fetchedAt || "",
-    };
+    }, value.estimateRatio || ratio.ratio, value.estimateBasis || ratio.basis);
     exact.set(`${city}|${area}`, record);
     const normalizedKey = `${normalizeCity(city)}|${normalizeCity(area)}`;
     if (!normalized.has(normalizedKey)) normalized.set(normalizedKey, record);
@@ -297,7 +363,7 @@ function createDetailRecordLookup(chinaData) {
     const cityAverage = cityLookup(province, city) || cityLookup(city, city) || cityLookup("", city);
     return cityAverage ? {
       ...cityAverage,
-      quality: "城市住宅挂牌均价，用于区县底色",
+      quality: cityAverage.newPriceEstimated ? "城市新房估算均价，用于区县底色" : "城市新房均价，用于区县底色",
       dataLevel: "city-inherited",
       inheritedCityAverage: true,
       supplemental: true,
@@ -408,7 +474,7 @@ function main() {
     subtitle: "一张地图渐进细化；放大后自动加载区县边界和价格标签",
     updateLine: `数据：${data.metadata?.coverage || "全国城市"}；最近抓取：${fetchedAt}`,
     sideTitle: "全国城市数据",
-    caption: "全国城市住宅挂牌均价总览；放大任意地区会按需叠加区县级边界。",
+    caption: "默认看新房价；若缺少真实新房样本，会按新房/二手比例估算，并保留二手/挂牌参考价。",
     width: 1800,
     height: 1320,
     mapBox: MAP_BOX,
@@ -431,8 +497,8 @@ function main() {
       <b>更新：</b>GitHub Actions 每周一 04:00（北京时间）尝试拉取全国城市排行；页面生成 ${generatedAtText}。<br>
       <b>渐进细化：</b>全国初始为城市级；缩放到任意地区时按省份懒加载区县级边界，避免一次性加载过重。<br>
       <b>覆盖：</b>当前全国底图 ${features.length} 个城市级区域，已匹配房价 ${matched} 个；区县级细节 ${detailRegionCount} 个区域，独立区县数据 ${detailIndependentCount} 个（补充来源 ${detailSupplementalCount} 个），沿用市均 ${detailInheritedCount} 个。<br>
-      <b>口径：</b>主数据为禧泰数据/中国房价行情城市住宅挂牌均价；缺口区县用房天下查房价二手房参考均价补充；香港、澳门使用补充估算并以不同口径标注。<br>
-      <b>说明：</b>标签或列表中的“市均”表示该区县暂未抓到独立价格，当前沿用所属城市均价；“补充”表示来自非主来源的区县均价。
+      <b>口径：</b>页面默认展示新房价；真实新房样本优先来自城市房网新盘均价，缺少新房样本时按同城、同省或全国新房/二手比例估算；二手/挂牌参考价来自禧泰数据/中国房价行情和房天下查房价。<br>
+      <b>说明：</b>标签中的“估”表示新房价为估算值；“二手/挂牌”会在详情里作为参考价并排显示；“市均”表示该区县暂未抓到独立价格，当前沿用所属城市均价。
     `,
   });
   fs.writeFileSync(OUT_HTML, html, "utf8");
