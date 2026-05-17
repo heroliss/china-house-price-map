@@ -103,6 +103,8 @@ function createLayerPayload(id, features, outlines, projection, getRecord, toler
       mom: record?.mom || "",
       source: record?.source || "",
       quality: record?.quality || "",
+      dataLevel: record?.dataLevel || "",
+      inherited: Boolean(record?.inheritedCityAverage),
       supplemental: Boolean(record?.supplemental),
       d,
       bounds: pathBounds(d),
@@ -221,7 +223,7 @@ function buildSupplementalLookup(table, source, quality) {
   for (const [key, value] of Object.entries(table || {})) {
     const [city, area] = key.split("|");
     if (!city || !area) continue;
-    const record = { price: value[0], mom: value[1], source, quality };
+    const record = { price: value[0], mom: value[1], source, quality, dataLevel: "district" };
     exact.set(`${city}|${area}`, record);
     normalized.set(`${normalizeCity(city)}|${normalizeCity(area)}`, record);
   }
@@ -234,6 +236,11 @@ function buildSupplementalLookup(table, source, quality) {
 
 function createDetailRecordLookup(chinaData) {
   const cityLookup = createPriceLookup(chinaData);
+  const nationalDistrictLookup = buildSupplementalLookup(
+    chinaData.districtData,
+    "禧泰数据/中国房价行情",
+    "区县住宅挂牌均价",
+  );
   const gbaLookup = buildSupplementalLookup(
     readOptionalJson(GBA_DATA_FILE).mainlandData,
     "禧泰数据/中国房价行情",
@@ -247,7 +254,7 @@ function createDetailRecordLookup(chinaData) {
 
   return (city, name, feature) => {
     const province = feature?.properties?.province || city;
-    const direct = gbaLookup(city, name) || jjjLookup(city, name);
+    const direct = nationalDistrictLookup(city, name) || gbaLookup(city, name) || jjjLookup(city, name);
     if (direct) return direct;
 
     if (feature?.properties?.fallbackCityLevel) {
@@ -258,6 +265,8 @@ function createDetailRecordLookup(chinaData) {
     return cityAverage ? {
       ...cityAverage,
       quality: "城市住宅挂牌均价，用于区县底色",
+      dataLevel: "city-inherited",
+      inheritedCityAverage: true,
       supplemental: true,
     } : null;
   };
@@ -337,6 +346,8 @@ function buildProvinceDetailLayers(projection, data) {
       bounds: payload.bounds,
       regions: payload.regions.length,
       priced: payload.regions.filter(region => region.price).length,
+      inherited: payload.regions.filter(region => region.price && region.inherited).length,
+      independent: payload.regions.filter(region => region.price && !region.inherited).length,
     };
   }).filter(Boolean);
 }
@@ -354,6 +365,8 @@ function main() {
   const matched = features.filter(feature => getRecord(feature.properties.city, feature.properties.name)).length;
   const detailRegionCount = detailLayers.reduce((sum, layer) => sum + layer.regions, 0);
   const detailPricedCount = detailLayers.reduce((sum, layer) => sum + layer.priced, 0);
+  const detailIndependentCount = detailLayers.reduce((sum, layer) => sum + layer.independent, 0);
+  const detailInheritedCount = detailLayers.reduce((sum, layer) => sum + layer.inherited, 0);
   const html = createInteractiveMap({
     pageTitle: "全国房价交互地图",
     title: "全国房价地图",
@@ -382,9 +395,9 @@ function main() {
     notesHtml: `
       <b>更新：</b>GitHub Actions 每周一 04:00（北京时间）尝试拉取全国城市排行；页面生成 ${generatedAtText}。<br>
       <b>渐进细化：</b>全国初始为城市级；缩放到任意地区时按省份懒加载区县级边界，避免一次性加载过重。<br>
-      <b>覆盖：</b>当前全国底图 ${features.length} 个城市级区域，已匹配房价 ${matched} 个；区县级细节 ${detailRegionCount} 个区域，已匹配或沿用城市均价 ${detailPricedCount} 个。<br>
+      <b>覆盖：</b>当前全国底图 ${features.length} 个城市级区域，已匹配房价 ${matched} 个；区县级细节 ${detailRegionCount} 个区域，独立区县数据 ${detailIndependentCount} 个，沿用市均 ${detailInheritedCount} 个。<br>
       <b>口径：</b>主数据为禧泰数据/中国房价行情城市住宅挂牌均价；香港、澳门使用补充估算并以不同口径标注。<br>
-      <b>说明：</b>缺少区县独立数据的区域会沿用所属城市均价作为底色和标签，详情面板会标注对应口径。
+      <b>说明：</b>标签或列表中的“市均”表示该区县暂未抓到独立价格，当前沿用所属城市均价；详情面板会标注“沿用市均”。
     `,
   });
   fs.writeFileSync(OUT_HTML, html, "utf8");
