@@ -375,8 +375,8 @@ function main() {
     detailSources: detailLayers.map(layer => ({
       id: layer.id,
       url: `data/layers/${layer.file}`,
-      minScale: 8.8,
-      labelScale: 9.8,
+      minScale: 13,
+      labelScale: 15,
       bounds: layer.bounds,
     })),
     notesHtml: `
