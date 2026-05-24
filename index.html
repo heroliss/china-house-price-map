@@ -92,7 +92,7 @@
 <body>
 <main class="app">
   <section class="mapShell">
-    <header><h1>全国房价地图</h1><p>一张地图渐进细化；放大后自动加载区县边界和价格标签</p><p>数据：312个城市；最近抓取：2026-05-18 04:46 北京时间</p></header>
+    <header><h1>全国房价地图</h1><p>一张地图渐进细化；放大后自动加载区县边界和价格标签</p><p>数据：312个城市；最近抓取：2026-05-25 04:51 北京时间</p></header>
     
     <div class="toolbar"><button id="zoomIn" title="放大地图" aria-label="放大地图">+</button><button id="zoomOut" title="缩小地图" aria-label="缩小地图">-</button><button id="reset" title="回到初始视图">重置视图</button><button id="toggleLabels" title="显示或隐藏城市、区县和房价标注">隐藏标注</button><button id="toggleTiles" title="叠加真实地图底图">真实底图</button></div>
     <div class="labelControl mapControl"><label for="labelScale">标注大小</label><input id="labelScale" type="range" min="50" max="200" value="100"><span id="labelScaleValue">100%</span></div>
@@ -119,9 +119,9 @@
     <div id="selected" class="selected"><div class="name">点击或悬停地图区域</div><div class="meta">可查看房价、环比和数据口径。</div></div>
     <div id="rows" class="rows"></div>
     <div class="notes">
-      <b>更新：</b>GitHub Actions 每周一 04:00（北京时间）尝试拉取全国城市排行；页面生成 2026-05-18 04:49 北京时间。<br>
+      <b>更新：</b>GitHub Actions 每周一 04:00（北京时间）尝试拉取全国城市排行；页面生成 2026-05-25 04:55 北京时间。<br>
       <b>渐进细化：</b>全国初始为城市级；缩放到任意地区时按省份懒加载区县级边界，避免一次性加载过重。<br>
-      <b>覆盖：</b>当前全国底图 370 个城市级区域，已匹配房价 312 个；区县级细节 2927 个区域，独立区县数据 1525 个（补充来源 456 个），沿用市均 1182 个。<br>
+      <b>覆盖：</b>当前全国底图 370 个城市级区域，已匹配房价 312 个；区县级细节 2927 个区域，独立区县数据 1524 个（补充来源 455 个），沿用市均 1183 个。<br>
       <b>口径：</b>页面默认展示二手/挂牌价，来自禧泰数据/中国房价行情和房天下查房价；真实新房样本优先来自城市房网新盘均价，并在详情中并列显示。缺挂牌价但有新房价时，按同城、同省或全国新房/挂牌配对样本的稳健中位数反推挂牌价。<br>
       <b>说明：</b>标签中的“估”仅表示当前主价由新房价反推估算；“新房”或“新房估算”会在详情里作为参考价显示；“市均”表示该区县暂未抓到独立价格，当前沿用所属城市均价。
     </div>
