@@ -374,7 +374,7 @@ function createInteractiveMap(config) {
   });
   const isInheritedRegion = r => Boolean(r.inherited || r.dataLevel === "city-inherited");
   const regionClasses = r => `region${isInheritedRegion(r) ? " inheritedRegion" : ""}`;
-  const regionAttrs = r => `data-city="${esc(r.city)}" data-name="${esc(r.name)}" data-level="${esc(r.dataLevel || "")}" data-inherited="${isInheritedRegion(r) ? "true" : "false"}"`;
+  const regionAttrs = r => `data-city="${esc(r.city)}" data-name="${esc(r.name)}" data-level="${esc(r.dataLevel || "")}" data-inherited="${isInheritedRegion(r) ? "true" : "false"}" data-no-price="${r.price ? "false" : "true"}"`;
   const detailLabelText = r => `${esc(r.label)} ${fmtWanLabel(r.price)}${r.priceType === "resale-estimated" ? " 估" : ""}${isInheritedRegion(r) ? " 市均" : ""}`;
 
   return `<!doctype html>
@@ -383,22 +383,30 @@ function createInteractiveMap(config) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(config.pageTitle)}</title>
+<script>
+// 首帧就使用保存的偏好；尚未选择时跟随系统，存储不可用也可正常浏览。
+(()=>{let theme;try{theme=localStorage.getItem('house-price-map-theme')}catch(_){}document.documentElement.dataset.theme=theme==='light'||theme==='dark'?theme:(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')})();
+</script>
 <style>
-  :root { --ink:#1b2c33; --muted:#63767d; --line:#dbe6e3; --brand:#2f89a6; --overlay-opacity:.60; --label-scale:1.50; }
+  :root { color-scheme:light; --ink:#1b2c33; --muted:#63767d; --line:#dbe6e3; --brand:#2f89a6; --panel:rgba(255,255,255,.86); --control:#fff; --floating:rgba(255,255,255,.90); --selected:#f7fbfa; --active:#edf6f4; --price-ink:#173864; --active-ink:#1f6677; --region-stroke:rgba(255,255,255,.92); --boundary:#153f49; --no-data:#eef2f0; --overlay-opacity:.60; --label-scale:1.50; }
+  :root[data-theme="dark"] { color-scheme:dark; --ink:#e9f1fa; --muted:#a0b5c9; --line:#30475a; --brand:#76d8ec; --panel:#101c2b; --control:#172638; --floating:rgba(13,25,39,.96); --selected:#14263a; --active:#1c3548; --price-ink:#a5d2ff; --active-ink:#76d8ec; --region-stroke:#172d3e; --boundary:#88a6b9; --no-data:#233244; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:"Microsoft YaHei","Noto Sans CJK SC",Arial,sans-serif; color:var(--ink); background:linear-gradient(135deg,#f7faf8,#f4f0e8); }
+  :root[data-theme="dark"] body { background:linear-gradient(135deg,#080f1a,#0c1825); }
   .app { min-height:100vh; display:grid; grid-template-columns:minmax(720px,1fr) 430px; gap:18px; padding:24px; }
-  .mapShell,.side { min-width:0; background:rgba(255,255,255,.86); border:1px solid var(--line); border-radius:14px; box-shadow:0 18px 38px rgba(37,70,80,.10); }
+  .mapShell,.side { min-width:0; background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:0 18px 38px rgba(37,70,80,.10); }
   .mapShell { position:relative; overflow:hidden; min-height:calc(100vh - 48px); overscroll-behavior:contain; }
-  header { position:absolute; z-index:3; left:26px; top:22px; pointer-events:none; }
+  header { position:absolute; z-index:3; left:26px; top:22px; max-width:calc(100% - 350px); padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--floating); pointer-events:none; }
   h1 { margin:0; font-size:34px; letter-spacing:0; }
   header p { margin:8px 0 0; color:var(--muted); font-size:14px; }
-  .toolbar { position:absolute; right:18px; top:18px; z-index:4; display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+  .toolbar { position:absolute; right:18px; top:18px; z-index:4; display:grid; grid-template-columns:repeat(3,auto); gap:8px; justify-content:end; }
   .presetBar { position:absolute; z-index:4; left:26px; top:104px; display:flex; gap:7px; flex-wrap:wrap; max-width:min(640px,calc(100% - 360px)); }
-  button,.mapNav,input { border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:8px; font:inherit; }
+  button,.mapNav,input { border:1px solid var(--line); background:var(--control); color:var(--ink); border-radius:8px; font:inherit; }
+  button:focus-visible,.mapNav:focus-visible,input:focus-visible { outline:2px solid var(--brand); outline-offset:3px; }
+  input::placeholder { color:var(--muted); opacity:1; }
   button,.mapNav { height:36px; padding:8px 12px; cursor:pointer; text-decoration:none; line-height:18px; }
   button:hover,.mapNav:hover { border-color:#9fcac6; }
-  button.active,.mapNav.active { border-color:#2f89a6; background:#edf7f6; color:#1f6677; font-weight:800; }
+  button.active,.mapNav.active { border-color:var(--brand); background:var(--active); color:var(--active-ink); font-weight:800; }
   svg { width:100%; height:calc(100vh - 48px); display:block; cursor:grab; touch-action:none; user-select:none; }
   svg.dragging { cursor:grabbing; }
   #viewport { will-change:transform; }
@@ -407,9 +415,11 @@ function createInteractiveMap(config) {
   .detailDataset.hidden { display:none; }
   #priceOverlay { transition:opacity .15s; }
   .mapTilesOn #priceOverlay { opacity:var(--overlay-opacity); }
-  .region { stroke:rgba(255,255,255,.92); stroke-width:.85; vector-effect:non-scaling-stroke; transition:opacity .15s; }
+  .region { stroke:var(--region-stroke); stroke-width:.85; vector-effect:non-scaling-stroke; transition:opacity .15s; }
+  .region[data-no-price="true"] { fill:var(--no-data); }
+  .regionSeal[data-no-price="true"] { stroke:var(--no-data); }
   svg.dragging .region { pointer-events:none; }
-  .cityBoundary { fill:none; stroke:#153f49; stroke-width:2.1; vector-effect:non-scaling-stroke; pointer-events:none; opacity:.7; }
+  .cityBoundary { fill:none; stroke:var(--boundary); stroke-width:2.1; vector-effect:non-scaling-stroke; pointer-events:none; opacity:.7; }
   .highlightPath { fill:none; pointer-events:none; vector-effect:non-scaling-stroke; stroke-linejoin:round; stroke-linecap:round; }
   #hoverHighlight { stroke:#ffd15c; stroke-width:3.2; opacity:.95; }
   #selectedHighlight { fill:rgba(22,183,168,.18); stroke:#0ba99d; stroke-width:4; opacity:1; }
@@ -419,11 +429,14 @@ function createInteractiveMap(config) {
   .dimmed { opacity:.18; }
   .cityLabel { font-size:calc(17px * var(--label-scale)); font-weight:900; fill:#0c5261; paint-order:stroke; stroke:rgba(255,255,255,.88); stroke-width:4.4px; pointer-events:none; }
   .detailLabel { display:none; font-size:calc(8.4px * var(--label-scale)); font-weight:800; fill:#25363d; paint-order:stroke; stroke:rgba(255,255,255,.94); stroke-width:2px; pointer-events:none; }
+  :root[data-theme="dark"] .cityLabel { fill:#b4eaf2; stroke:#0b1422; }
+  :root[data-theme="dark"] .detailLabel { fill:#f0f6ff; stroke:#0b1422; }
   .mapShell.isMoving .region { transition:none; }
   .tileBuffer { opacity:0; transition:opacity .16s ease; }
   .tileBuffer.active { opacity:1; }
   .tileImage { opacity:.78; }
-  .legend,.tileAttribution,.mapControl { position:absolute; z-index:4; background:rgba(255,255,255,.84); border:1px solid var(--line); }
+  :root[data-theme="dark"] .tileImage { filter:brightness(.48) saturate(.65); }
+  .legend,.tileAttribution,.mapControl { position:absolute; z-index:4; background:var(--floating); border:1px solid var(--line); }
   .legend { left:26px; bottom:22px; border-radius:12px; padding:12px 14px; }
   .legendTitle { font-weight:800; margin-bottom:8px; }
   .swatches { display:flex; gap:6px; align-items:center; }
@@ -432,8 +445,8 @@ function createInteractiveMap(config) {
   .tileAttribution { right:18px; bottom:16px; display:none; border-radius:8px; padding:5px 8px; color:var(--muted); font-size:11px; }
   .mapTilesOn .tileAttribution { display:block; }
   .mapControl { right:18px; top:62px; display:grid; grid-template-columns:auto minmax(0,1fr) 42px; align-items:center; gap:8px; width:272px; padding:8px 10px; border-radius:10px; font-size:12px; font-weight:800; }
-  .labelControl { top:62px; }
-  .overlayControl { top:106px; display:none; }
+  .labelControl { top:106px; }
+  .overlayControl { top:150px; display:none; }
   .mapTilesOn .overlayControl { display:grid; }
   .mapControl input { width:100%; min-width:0; accent-color:var(--brand); }
   .mapControl span { text-align:right; color:var(--muted); font-weight:700; }
@@ -446,26 +459,33 @@ function createInteractiveMap(config) {
   .search { width:100%; height:40px; padding:0 12px; margin:14px 0; }
   .sortBar { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:14px; }
   .sortBar button { height:32px; padding:0 8px; font-size:13px; }
-  .selected { min-height:104px; border:1px solid var(--line); background:#f7fbfa; border-radius:10px; padding:14px; margin-bottom:16px; }
+  .selected { min-height:104px; border:1px solid var(--line); background:var(--selected); border-radius:10px; padding:14px; margin-bottom:16px; }
   .selected .name { font-size:20px; font-weight:900; }
-  .selected .price { color:#173864; font-size:28px; font-weight:900; margin-top:6px; }
+  .selected .price { color:var(--price-ink); font-size:28px; font-weight:900; margin-top:6px; }
   .selected .meta { color:var(--muted); margin-top:4px; }
   .rows { display:grid; gap:6px; }
   .row { display:grid; grid-template-columns:1fr auto auto auto auto; gap:9px; align-items:center; padding:9px 10px; border-radius:8px; cursor:pointer; }
-  .row:hover,.row.active { background:#edf6f4; }
+  .row:hover,.row.active { background:var(--active); }
   .row b { font-size:14px; }
-  .row .price { color:#173864; font-weight:800; }
+  .row .price { color:var(--price-ink); font-weight:800; }
   .levelBadge { border:1px solid #c9d8d5; border-radius:999px; color:#49666d; font-size:11px; font-weight:800; line-height:1; padding:4px 6px; background:#f7faf8; white-space:nowrap; }
   .levelBadge.inherited { border-color:#e4c17b; color:#7a5a10; background:#fff8df; }
   .levelBadge.new { border-color:#85c9b8; color:#116250; background:#ecfaf5; }
   .levelBadge.district { border-color:#9ccfc8; color:#17675d; background:#eaf8f6; }
   .levelBadge.supplement { border-color:#c6b4e8; color:#5b3d8a; background:#f4efff; }
+  :root[data-theme="dark"] .levelBadge { border-color:#456073; color:#c6d6e6; background:#182a39; }
+  :root[data-theme="dark"] .levelBadge.inherited { border-color:#746133; color:#f0d285; background:#3b321c; }
+  :root[data-theme="dark"] .levelBadge.new { border-color:#3b7662; color:#91e1c5; background:#143a31; }
+  :root[data-theme="dark"] .levelBadge.district { border-color:#3f7776; color:#8ee3d9; background:#123738; }
+  :root[data-theme="dark"] .levelBadge.supplement { border-color:#6b578d; color:#cfbdff; background:#302546; }
   .locateRow { height:28px; padding:0 9px; font-size:12px; white-space:nowrap; }
   .up { color:#087b60; } .down { color:#bd4c45; }
+  :root[data-theme="dark"] .up { color:#7be3b4; } :root[data-theme="dark"] .down { color:#f89b94; }
   .notes { margin-top:18px; border-top:1px solid var(--line); padding-top:14px; font-size:12px; }
   @media (max-width:1100px){ .app{grid-template-columns:1fr}.mapShell{min-height:72vh}svg{height:72vh}.side{max-height:none} }
-  @media (max-width:760px){ .app{padding:6px;gap:8px;max-width:100vw;overflow:hidden}.mapShell{min-height:82svh;border-radius:10px}header{left:8px;top:8px;max-width:calc(100% - 174px);padding:7px 9px;border:1px solid rgba(219,230,227,.9);border-radius:10px;background:rgba(255,255,255,.72);backdrop-filter:blur(8px)}h1{font-size:17px;line-height:1.1}header p{display:none}.presetBar{left:8px;right:8px;top:51px;max-width:none;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px}.presetBar button{height:30px;white-space:nowrap;font-size:12px;padding:0 9px}.toolbar{left:auto;right:8px;top:8px;width:153px;display:grid;grid-template-columns:repeat(2,74px);gap:5px}.toolbar button,.toolbar .mapNav{width:74px;height:32px;padding:7px 0;font-size:12px;text-align:center;justify-content:center}.toolbar #toggleTiles{width:153px;grid-column:1/3}.mapControl{left:8px;right:8px;top:auto;width:auto;padding:6px 8px;font-size:11px}.labelControl{bottom:80px}.overlayControl{bottom:126px}svg{height:82svh}.cityLabel{font-size:calc(17px * var(--label-scale));stroke-width:4.8px}.detailLabel{font-size:calc(11px * var(--label-scale));stroke-width:2.9px}.legend{left:8px;right:8px;bottom:8px;padding:8px;border-radius:10px}.swatch{width:auto;flex:1;min-width:0;height:12px}.legendLabels{grid-template-columns:repeat(${colors.length},1fr);gap:4px;font-size:8.4px}.side{padding:14px;border-radius:10px}.sortBar{grid-template-columns:repeat(2,1fr)} }
+  @media (max-width:760px){ .app{padding:6px;gap:8px;max-width:100vw;overflow:hidden}.mapShell{min-height:82svh;border-radius:10px}header{left:8px;top:8px;max-width:calc(100% - 174px);padding:7px 9px;border:1px solid var(--line);border-radius:10px;background:var(--floating);backdrop-filter:blur(8px)}h1{font-size:17px;line-height:1.1}header p{display:none}.presetBar{left:8px;right:8px;top:51px;max-width:none;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px}.presetBar button{height:30px;white-space:nowrap;font-size:12px;padding:0 9px}.toolbar{left:auto;right:8px;top:8px;width:153px;display:grid;grid-template-columns:repeat(2,74px);gap:5px}.toolbar button,.toolbar .mapNav{width:74px;height:32px;padding:7px 0;font-size:12px;text-align:center;justify-content:center}.toolbar #toggleTiles{width:74px;grid-column:auto}.mapControl{left:8px;right:8px;top:auto;width:auto;padding:6px 8px;font-size:11px}.labelControl{bottom:80px}.overlayControl{bottom:126px}svg{height:82svh}.cityLabel{font-size:calc(17px * var(--label-scale));stroke-width:4.8px}.detailLabel{font-size:calc(11px * var(--label-scale));stroke-width:2.9px}.legend{left:8px;right:8px;bottom:8px;padding:8px;border-radius:10px}.swatch{width:auto;flex:1;min-width:0;height:12px}.legendLabels{grid-template-columns:repeat(${colors.length},1fr);gap:4px;font-size:8.4px}.side{padding:14px;border-radius:10px}.sortBar{grid-template-columns:repeat(2,1fr)} }
   @media (max-width:760px){ .mapShell{width:calc(100vw - 12px);max-width:calc(100vw - 12px)}.mapControl{right:auto;width:min(340px,calc(100vw - 28px));max-width:calc(100vw - 28px);grid-template-columns:52px minmax(0,1fr) 38px}.legend{right:auto;width:min(340px,calc(100vw - 28px));max-width:calc(100vw - 28px)} }
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
@@ -473,13 +493,13 @@ function createInteractiveMap(config) {
   <section class="mapShell">
     <header><h1>${esc(config.title)}</h1><p>${esc(config.subtitle)}</p><p>${esc(config.updateLine)}</p></header>
     ${config.showPresetButtons === false ? "" : `<div class="presetBar">${(config.viewPresets || []).map(preset => `<button class="presetButton" data-preset="${esc(preset.id)}">${esc(preset.label)}</button>`).join("")}</div>`}
-    <div class="toolbar">${(config.navLinks || []).map(link => `<a class="mapNav${link.active ? " active" : ""}" href="${esc(link.href)}" data-short="${esc(link.shortLabel || link.label)}">${esc(link.label)}</a>`).join("")}<button id="zoomIn" title="放大地图" aria-label="放大地图">+</button><button id="zoomOut" title="缩小地图" aria-label="缩小地图">-</button><button id="reset" title="回到初始视图">重置视图</button><button id="toggleLabels" title="显示或隐藏城市、区县和房价标注">隐藏标注</button><button id="toggleTiles" title="叠加真实地图底图">真实底图</button></div>
+    <div class="toolbar">${(config.navLinks || []).map(link => `<a class="mapNav${link.active ? " active" : ""}" href="${esc(link.href)}" data-short="${esc(link.shortLabel || link.label)}">${esc(link.label)}</a>`).join("")}<button id="zoomIn" title="放大地图" aria-label="放大地图">+</button><button id="zoomOut" title="缩小地图" aria-label="缩小地图">-</button><button id="reset" title="回到初始视图">重置视图</button><button id="toggleLabels" title="显示或隐藏城市、区县和房价标注">隐藏标注</button><button id="toggleTiles" title="叠加真实地图底图">真实底图</button><button id="toggleTheme" type="button" title="切换明暗模式" aria-label="切换到深色模式" aria-pressed="false">深色</button></div>
     <div class="labelControl mapControl"><label for="labelScale">标注大小</label><input id="labelScale" type="range" min="50" max="200" value="100"><span id="labelScaleValue">100%</span></div>
     <div class="overlayControl mapControl"><label for="overlayOpacity">房价透明度</label><input id="overlayOpacity" type="range" min="0" max="100" value="${config.overlayOpacity ?? 60}"><span id="overlayOpacityValue">${config.overlayOpacity ?? 60}%</span></div>
     <svg id="map" viewBox="${mapViewBox.x.toFixed(2)} ${mapViewBox.y.toFixed(2)} ${mapViewBox.w.toFixed(2)} ${mapViewBox.h.toFixed(2)}" preserveAspectRatio="xMidYMid meet">
       <g id="viewport">
         <g id="tileLayerA" class="tileBuffer active"></g><g id="tileLayerB" class="tileBuffer"></g>
-        <g id="priceOverlay"><g id="regionSeals">${regions.map(r => `<path class="regionSeal" d="${r.d}" fill="${r.fill}" stroke="${r.fill}"></path>`).join("")}</g><g id="regionLayer">${regions.map(r => `<path id="${r.id}" class="${regionClasses(r)}" ${regionAttrs(r)} d="${r.d}" fill="${r.fill}"></path>`).join("")}</g><g id="detailLayer"></g></g>
+        <g id="priceOverlay"><g id="regionSeals">${regions.map(r => `<path class="regionSeal" data-no-price="${r.price ? "false" : "true"}" d="${r.d}" fill="${r.fill}" stroke="${r.fill}"></path>`).join("")}</g><g id="regionLayer">${regions.map(r => `<path id="${r.id}" class="${regionClasses(r)}" ${regionAttrs(r)} d="${r.d}" fill="${r.fill}"></path>`).join("")}</g><g id="detailLayer"></g></g>
         <g id="cityBoundaries">${cityBoundaries.map(r => `<path id="${r.id}" class="cityBoundary" d="${r.d}"></path>`).join("")}</g>
         <g id="detailBoundaries"></g>
         <g id="highlightLayer"><path id="selectedPulse" class="highlightPath"></path><path id="selectedHighlight" class="highlightPath"></path><path id="hoverHighlight" class="highlightPath"></path></g>
@@ -493,7 +513,7 @@ function createInteractiveMap(config) {
   <aside class="side">
     <h2>${esc(config.sideTitle || "区域数据")}</h2>
     <p class="caption">${esc(config.caption || "")}</p>
-    <input id="search" class="search" placeholder="搜索城市或区县">
+    <input id="search" class="search" aria-label="搜索城市或区县" placeholder="搜索城市或区县">
     <div class="sortBar"><button data-sort="priceDesc" class="active">价格高</button><button data-sort="priceAsc">价格低</button><button data-sort="momDesc">涨幅高</button><button data-sort="momAsc">跌幅高</button><button data-sort="city">按城市</button><button data-sort="name">按名称</button></div>
     <div id="selected" class="selected"><div class="name">点击或悬停地图区域</div><div class="meta">可查看房价、环比和数据口径。</div></div>
     <div id="rows" class="rows"></div>
@@ -521,7 +541,19 @@ let detailLabelEls=Array.from(document.querySelectorAll('.detailLabel')).map(el=
 const sortButtons=Array.from(document.querySelectorAll('.sortBar button')),collator=new Intl.Collator('zh-Hans-CN'),labelScaleBase=1.5;
 let state={scale:1,x:0,y:0},dragging=false,last=null,activePointers=new Map(),pinch=null,tapCandidate=null,activeId=null,labelsVisible=true,sortMode='priceDesc',tilesVisible=false,overlayOpacity=Number(overlayOpacityInput.value)/100,labelScale=Number(labelScaleInput.value)/100*labelScaleBase,lastTileKey='',pendingTileKey='',tileLoadToken=0,activeTileBuffer=0,rowEls=[],renderFrame=0,renderForceLabels=false,renderImmediateTiles=false,renderDeferHeavy=false,lastRenderedScale=0,tileUpdateTimer=0,labelSettleTimer=0,viewportSettleTimer=0,tooltipPlaceId='',detailDatasetEls=[],viewMetricCache=null,moveAnimationToken=0;
 const loadedDetailSources=new Set(),loadingDetailSources=new Set();
+const themeButton=document.getElementById('toggleTheme'),themeMedia=matchMedia('(prefers-color-scheme: dark)');
+function savedTheme(){try{const theme=localStorage.getItem('house-price-map-theme');return theme==='light'||theme==='dark'?theme:null}catch(_){return null}}
+function applyTheme(theme,persist=false){
+  document.documentElement.dataset.theme=theme;
+  const dark=theme==='dark';themeButton.textContent=dark?'浅色':'深色';themeButton.setAttribute('aria-label',dark?'切换到浅色模式':'切换到深色模式');themeButton.setAttribute('aria-pressed',String(dark));
+  if(persist){try{localStorage.setItem('house-price-map-theme',theme)}catch(_){}}
+  scheduleTransform({forceLabels:true});
+}
+themeButton.addEventListener('click',()=>applyTheme(document.documentElement.dataset.theme==='dark'?'light':'dark',true));
+themeMedia.addEventListener('change',event=>{if(!savedTheme())applyTheme(event.matches?'dark':'light')});
+window.addEventListener('storage',event=>{if(event.key===null||event.key==='house-price-map-theme')applyTheme(savedTheme()||(themeMedia.matches?'dark':'light'))});
 const minScale=.7,maxScale=${Number(config.maxScale || 60)},maxDetailLoadsPerPass=${Number(config.maxDetailLoadsPerPass || 3)},projection=${JSON.stringify({ minX: projection.minX, minY: projection.minY, maxX: projection.maxX, maxY: projection.maxY, scale: projection.scale, ox: projection.ox, oy: projection.oy })},mapBounds=${JSON.stringify(projection.projectedMapBounds)};
+applyTheme(savedTheme()||(themeMedia.matches?'dark':'light'));
 function fmt(value){return Number(value).toLocaleString('zh-CN')} function fmtWan(value){return Number((Number(value)/10000).toFixed(1)).toLocaleString('zh-CN',{maximumFractionDigits:1})+'万'} function escapeHtml(value){return String(value??'').replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]))}
 function isInherited(r){return !!(r&& (r.inherited||r.dataLevel==='city-inherited'||String(r.quality||'').includes('用于区县底色')))} function isSupplement(r){return !!(r&&(r.dataLevel==='district-supplement'||(r.supplemental&&!isInherited(r))))} function marketText(r){if(!r?.price)return '';if(r.priceType==='new')return '新房';if(r.priceType==='new-estimated')return '新房估算';if(r.priceType==='resale')return '挂牌/二手';if(r.priceType==='resale-estimated')return '挂牌估算';return '房价'} function levelText(r){if(!r?.price)return '';if(isInherited(r))return marketText(r)+'市均';if(r.priceType==='new'||r.priceType==='new-estimated'||r.priceType==='resale'||r.priceType==='resale-estimated')return marketText(r);if(isSupplement(r))return '补充数据';if(r.dataLevel==='district'||String(r.quality||'').includes('区县'))return '区县数据';if(r.dataLevel==='city')return '城市数据';return '公开数据'} function levelClass(r){return isInherited(r)?'levelBadge inherited':(r.priceType==='new'?'levelBadge new':(r.priceType==='new-estimated'||r.priceType==='resale-estimated'||isSupplement(r)?'levelBadge supplement':(r.dataLevel==='district'||String(r.quality||'').includes('区县')?'levelBadge district':'levelBadge')))} function labelText(r){return escapeHtml(r.label)+' '+fmtWan(r.price)+(r.priceType==='resale-estimated'?' 估':'')+(isInherited(r)?' 市均':'')} function referenceLine(r){const parts=[];if(r.resalePrice)parts.push('挂牌/二手'+(r.resalePriceEstimated?'估算':'')+' '+fmt(r.resalePrice)+' 元/㎡');if(r.newPrice)parts.push('新房'+(r.newPriceEstimated?'估算':'')+' '+fmt(r.newPrice)+' 元/㎡');return parts.join(' · ')} function sourceLine(r){const estimate=(r.priceType==='resale-estimated'||r.priceType==='new-estimated'||r.newPriceEstimated||r.resalePriceEstimated)?r.estimateBasis:'';return [levelText(r),r.quality,r.source,estimate].filter(Boolean).join(' · ')}
 function applyOverlayOpacity(){document.documentElement.style.setProperty('--overlay-opacity',overlayOpacity.toFixed(2));overlayOpacityValue.textContent=Math.round(overlayOpacity*100)+'%'} function applyLabelScale(){document.documentElement.style.setProperty('--label-scale',labelScale.toFixed(2));labelScaleValue.textContent=Math.round(labelScale/labelScaleBase*100)+'%';scheduleTransform({forceLabels:true})} function applyMapLabelVisibility(){cityLabels.style.display=labelsVisible&&state.scale<2.55?'':'none';detailLabelEls.forEach(label=>label.el.style.display=labelsVisible&&state.scale>=label.minScale?'block':'none');toggleLabelsButton.textContent=labelsVisible?'隐藏标注':'显示标注';toggleLabelsButton.classList.toggle('active',labelsVisible)}
@@ -564,13 +596,13 @@ function setMoving(active){mapShell.classList.toggle('isMoving',!!active)}
 function finishViewportMove(){if(viewportSettleTimer){clearTimeout(viewportSettleTimer);viewportSettleTimer=0}setMoving(false);scheduleTransform({forceLabels:true,immediateTiles:true})}
 function queueViewportSettle(delay=140){setMoving(true);if(viewportSettleTimer)clearTimeout(viewportSettleTimer);viewportSettleTimer=setTimeout(()=>{viewportSettleTimer=0;finishViewportMove()},delay)}
 function zoom(factor,clientX,clientY){const rect=svg.getBoundingClientRect(),anchor=clientToSvg(clientX??(rect.left+rect.width/2),clientY??(rect.top+rect.height/2)),content=svgToContent(anchor),nextScale=Math.max(minScale,Math.min(maxScale,state.scale*factor));state.x=anchor.x-content.x*nextScale;state.y=anchor.y-content.y*nextScale;state.scale=nextScale;scheduleTransform({deferHeavy:true});queueLabelSettle();queueViewportSettle()}
-function cancelMoveAnimation(){moveAnimationToken+=1} function animateToState(target,duration=620){const token=++moveAnimationToken,start={scale:state.scale,x:state.x,y:state.y},startTime=performance.now(),ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;setMoving(true);function step(now){if(token!==moveAnimationToken)return;const p=Math.min(1,(now-startTime)/duration),e=ease(p);state.scale=start.scale+(target.scale-start.scale)*e;state.x=start.x+(target.x-start.x)*e;state.y=start.y+(target.y-start.y)*e;scheduleTransform({deferHeavy:p<1});if(p<1)requestAnimationFrame(step);else{state.scale=target.scale;state.x=target.x;state.y=target.y;finishViewportMove()}}requestAnimationFrame(step)}
+function cancelMoveAnimation(){moveAnimationToken+=1} function animateToState(target,duration=matchMedia('(prefers-reduced-motion: reduce)').matches?0:620){if(duration===0){state={...target};finishViewportMove();return}const token=++moveAnimationToken,start={scale:state.scale,x:state.x,y:state.y},startTime=performance.now(),ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;setMoving(true);function step(now){if(token!==moveAnimationToken)return;const p=Math.min(1,(now-startTime)/duration),e=ease(p);state.scale=start.scale+(target.scale-start.scale)*e;state.x=start.x+(target.x-start.x)*e;state.y=start.y+(target.y-start.y)*e;scheduleTransform({deferHeavy:p<1});if(p<1)requestAnimationFrame(step);else{state.scale=target.scale;state.x=target.x;state.y=target.y;finishViewportMove()}}requestAnimationFrame(step)}
 function animateFocusContentPoint(x,y,scale){const center=svgCenterPoint(),targetScale=Math.max(minScale,Math.min(maxScale,scale));animateToState({scale:targetScale,x:center.x-x*targetScale,y:center.y-y*targetScale})}
 function setHighlightPath(el,r){if(r&&r.d)el.setAttribute('d',r.d);else el.removeAttribute('d')} function setHoverHighlight(r){if(!r||r.id===activeId){setHighlightPath(hoverHighlight,null);return}setHighlightPath(hoverHighlight,r)} function setSelectedHighlight(r){setHighlightPath(selectedHighlight,r);setHighlightPath(selectedPulse,r)}
 function bindRegionElement(el){const r=placeById.get(el.id);if(!r)return;el.addEventListener('mousemove',event=>{setHoverHighlight(r);showTip(event,r)});el.addEventListener('mouseleave',()=>{setHoverHighlight(null);hideTip()})}
 function registerDetailLabels(container){Array.from(container.querySelectorAll('.detailLabel')).forEach(el=>{labelEls.push({el,x:Number(el.getAttribute('x')),y:Number(el.getAttribute('y'))});detailLabelEls.push({el,minScale:Number(el.dataset.minScale||2.2)})})}
 function setDatasetBounds(el,source){el.dataset.minScale=String(source.minScale||3);if(source.bounds){el.dataset.minX=source.bounds.minX;el.dataset.minY=source.bounds.minY;el.dataset.maxX=source.bounds.maxX;el.dataset.maxY=source.bounds.maxY}}
-function addDetailDataset(source,payload){if(document.getElementById('detail-'+source.id))return;const group=document.createElementNS('http://www.w3.org/2000/svg','g');group.id='detail-'+source.id;group.classList.add('detailDataset');setDatasetBounds(group,source);group.innerHTML='<g>'+payload.regions.map(r=>'<path id="'+r.id+'" class="region detailRegion'+(isInherited(r)?' inheritedRegion':'')+'" data-city="'+escapeHtml(r.city)+'" data-name="'+escapeHtml(r.name)+'" data-level="'+escapeHtml(r.dataLevel||'')+'" data-inherited="'+(isInherited(r)?'true':'false')+'" d="'+r.d+'" fill="'+r.fill+'"></path>').join('')+'</g>';detailLayer.appendChild(group);const boundary=document.createElementNS('http://www.w3.org/2000/svg','g');boundary.id='detail-boundary-'+source.id;boundary.classList.add('detailDataset');setDatasetBounds(boundary,source);boundary.innerHTML=payload.outlines.map(r=>'<path class="cityBoundary" d="'+r.d+'"></path>').join('');detailBoundaries.appendChild(boundary);const labels=document.createElementNS('http://www.w3.org/2000/svg','g');labels.id='detail-label-'+source.id;labels.classList.add('detailDataset');setDatasetBounds(labels,source);labels.innerHTML=payload.regions.filter(r=>r.price).map(r=>'<text class="detailLabel" data-region-id="'+escapeHtml(r.id)+'" x="'+r.cx+'" y="'+r.cy+'" data-min-scale="'+Math.max(r.labelMinScale,source.labelScale||3.2)+'" text-anchor="middle">'+labelText(r)+'</text>').join('');dynamicLabels.appendChild(labels);detailDatasetEls.push(group,boundary,labels);payload.regions.forEach(r=>{places.push(r);placeById.set(r.id,r)});const newRegionEls=Array.from(group.querySelectorAll('.region'));newRegionEls.forEach(bindRegionElement);regionEls=regionEls.concat(newRegionEls);registerDetailLabels(labels);if(mapShell.classList.contains('isMoving')){group.classList.add('hidden');boundary.classList.add('hidden');labels.classList.add('hidden');renderRows(search.value);return}updateDetailVisibility();renderRows(search.value);applyTransform({forceLabels:true,skipLoadDetails:true})}
+function addDetailDataset(source,payload){if(document.getElementById('detail-'+source.id))return;const group=document.createElementNS('http://www.w3.org/2000/svg','g');group.id='detail-'+source.id;group.classList.add('detailDataset');setDatasetBounds(group,source);group.innerHTML='<g>'+payload.regions.map(r=>'<path id="'+r.id+'" class="region detailRegion'+(isInherited(r)?' inheritedRegion':'')+'" data-city="'+escapeHtml(r.city)+'" data-name="'+escapeHtml(r.name)+'" data-level="'+escapeHtml(r.dataLevel||'')+'" data-inherited="'+(isInherited(r)?'true':'false')+'" data-no-price="'+(r.price?'false':'true')+'" d="'+r.d+'" fill="'+r.fill+'"></path>').join('')+'</g>';detailLayer.appendChild(group);const boundary=document.createElementNS('http://www.w3.org/2000/svg','g');boundary.id='detail-boundary-'+source.id;boundary.classList.add('detailDataset');setDatasetBounds(boundary,source);boundary.innerHTML=payload.outlines.map(r=>'<path class="cityBoundary" d="'+r.d+'"></path>').join('');detailBoundaries.appendChild(boundary);const labels=document.createElementNS('http://www.w3.org/2000/svg','g');labels.id='detail-label-'+source.id;labels.classList.add('detailDataset');setDatasetBounds(labels,source);labels.innerHTML=payload.regions.filter(r=>r.price).map(r=>'<text class="detailLabel" data-region-id="'+escapeHtml(r.id)+'" x="'+r.cx+'" y="'+r.cy+'" data-min-scale="'+Math.max(r.labelMinScale,source.labelScale||3.2)+'" text-anchor="middle">'+labelText(r)+'</text>').join('');dynamicLabels.appendChild(labels);detailDatasetEls.push(group,boundary,labels);payload.regions.forEach(r=>{places.push(r);placeById.set(r.id,r)});const newRegionEls=Array.from(group.querySelectorAll('.region'));newRegionEls.forEach(bindRegionElement);regionEls=regionEls.concat(newRegionEls);registerDetailLabels(labels);if(mapShell.classList.contains('isMoving')){group.classList.add('hidden');boundary.classList.add('hidden');labels.classList.add('hidden');renderRows(search.value);return}updateDetailVisibility();renderRows(search.value);applyTransform({forceLabels:true,skipLoadDetails:true})}
 async function loadDetailSource(source){if(loadedDetailSources.has(source.id)||loadingDetailSources.has(source.id))return;loadingDetailSources.add(source.id);try{const response=await fetch(source.url);if(!response.ok)throw new Error(response.status);const payload=await response.json();loadedDetailSources.add(source.id);addDetailDataset(source,payload)}catch(error){console.warn('detail layer failed',source.id,error)}finally{loadingDetailSources.delete(source.id)}}
 function expandedBounds(bounds,ratio=.35){const w=bounds.maxX-bounds.minX,h=bounds.maxY-bounds.minY;return{minX:bounds.minX-w*ratio,minY:bounds.minY-h*ratio,maxX:bounds.maxX+w*ratio,maxY:bounds.maxY+h*ratio}}
 function datasetVisible(el,bounds){if(state.scale<Number(el.dataset.minScale||3))return false;if(!el.dataset.minX)return true;const sourceBounds={minX:Number(el.dataset.minX),minY:Number(el.dataset.minY),maxX:Number(el.dataset.maxX),maxY:Number(el.dataset.maxY)};return intersects(expandedBounds(bounds,.25),sourceBounds)}
