@@ -103,7 +103,7 @@
   .up { color:#087b60; } .down { color:#bd4c45; }
   :root[data-theme="dark"] .up { color:#7be3b4; } :root[data-theme="dark"] .down { color:#f89b94; }
   .notes { margin-top:18px; border-top:1px solid var(--line); padding-top:14px; font-size:12px; }
-  @media (max-width:1100px){ .app{grid-template-columns:1fr}.mapShell{min-height:72vh}svg{height:72vh}.side{max-height:none} }
+  @media (max-width:1240px){ .app{grid-template-columns:1fr}.mapShell{min-height:72vh}svg{height:72vh}.side{max-height:none} }
   @media (max-width:760px){ .app{padding:6px;gap:8px;max-width:100vw;overflow:hidden}.mapShell{min-height:82svh;border-radius:10px}header{left:8px;top:8px;max-width:calc(100% - 174px);padding:7px 9px;border:1px solid var(--line);border-radius:10px;background:var(--floating);backdrop-filter:blur(8px)}h1{font-size:17px;line-height:1.1}header p{display:none}.presetBar{left:8px;right:8px;top:51px;max-width:none;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px}.presetBar button{height:30px;white-space:nowrap;font-size:12px;padding:0 9px}.toolbar{left:auto;right:8px;top:8px;width:153px;display:grid;grid-template-columns:repeat(2,74px);gap:5px}.toolbar button,.toolbar .mapNav{width:74px;height:32px;padding:7px 0;font-size:12px;text-align:center;justify-content:center}.toolbar #toggleTiles{width:74px;grid-column:auto}.mapControl{left:8px;right:8px;top:auto;width:auto;padding:6px 8px;font-size:11px}.labelControl{bottom:80px}.overlayControl{bottom:126px}svg{height:82svh}.cityLabel{font-size:calc(17px * var(--label-scale));stroke-width:4.8px}.detailLabel{font-size:calc(11px * var(--label-scale));stroke-width:2.9px}.legend{left:8px;right:8px;bottom:8px;padding:8px;border-radius:10px}.swatch{width:auto;flex:1;min-width:0;height:12px}.legendLabels{grid-template-columns:repeat(8,1fr);gap:4px;font-size:8.4px}.side{padding:14px;border-radius:10px}.sortBar{grid-template-columns:repeat(2,1fr)} }
   @media (max-width:760px){ .mapShell{width:calc(100vw - 12px);max-width:calc(100vw - 12px)}.mapControl{right:auto;width:min(340px,calc(100vw - 28px));max-width:calc(100vw - 28px);grid-template-columns:52px minmax(0,1fr) 38px}.legend{right:auto;width:min(340px,calc(100vw - 28px));max-width:calc(100vw - 28px)} }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
@@ -139,7 +139,7 @@
     <div id="selected" class="selected"><div class="name">点击或悬停地图区域</div><div class="meta">可查看房价、环比和数据口径。</div></div>
     <div id="rows" class="rows"></div>
     <div class="notes">
-      <b>更新：</b>GitHub Actions 每周一 04:00（北京时间）尝试拉取全国城市排行；页面生成 2026-10-23 13:49 北京时间。<br>
+      <b>更新：</b>GitHub Actions 每周一 04:00（北京时间）尝试拉取全国城市排行；页面生成 2026-10-23 14:00 北京时间。<br>
       <b>渐进细化：</b>全国初始为城市级；缩放到任意地区时按省份懒加载区县级边界，避免一次性加载过重。<br>
       <b>覆盖：</b>当前全国底图 370 个城市级区域，已匹配房价 314 个；区县级细节 2927 个区域，独立区县数据 1722 个（补充来源 669 个），沿用市均 999 个。<br>
       <b>口径：</b>页面默认展示二手/挂牌价，来自禧泰数据/中国房价行情和房天下查房价；真实新房样本优先来自城市房网新盘均价，并在详情中并列显示。缺挂牌价但有新房价时，按同城、同省或全国新房/挂牌配对样本的稳健中位数反推挂牌价。<br>
@@ -170,17 +170,18 @@ let state={scale:1,x:0,y:0},dragging=false,last=null,activePointers=new Map(),pi
 const loadedDetailSources=new Set(),loadingDetailSources=new Set();
 const themeButton=document.getElementById('toggleTheme'),themeMedia=matchMedia('(prefers-color-scheme: dark)');
 function savedTheme(){try{const theme=localStorage.getItem('house-price-map-theme');return theme==='light'||theme==='dark'?theme:null}catch(_){return null}}
+let themePreference=savedTheme();
 function applyTheme(theme,persist=false){
   document.documentElement.dataset.theme=theme;
   const dark=theme==='dark';themeButton.textContent=dark?'浅色':'深色';themeButton.setAttribute('aria-label',dark?'切换到浅色模式':'切换到深色模式');themeButton.setAttribute('aria-pressed',String(dark));
-  if(persist){try{localStorage.setItem('house-price-map-theme',theme)}catch(_){}}
+  if(persist){themePreference=theme;try{localStorage.setItem('house-price-map-theme',theme)}catch(_){}}
   scheduleTransform({forceLabels:true});
 }
 themeButton.addEventListener('click',()=>applyTheme(document.documentElement.dataset.theme==='dark'?'light':'dark',true));
-themeMedia.addEventListener('change',event=>{if(!savedTheme())applyTheme(event.matches?'dark':'light')});
-window.addEventListener('storage',event=>{if(event.key===null||event.key==='house-price-map-theme')applyTheme(savedTheme()||(themeMedia.matches?'dark':'light'))});
+themeMedia.addEventListener('change',event=>{if(!themePreference)applyTheme(event.matches?'dark':'light')});
+window.addEventListener('storage',event=>{if(event.key===null||event.key==='house-price-map-theme'){themePreference=savedTheme();applyTheme(themePreference||(themeMedia.matches?'dark':'light'))}});
 const minScale=.7,maxScale=180,maxDetailLoadsPerPass=3,projection={"minX":73.506474,"minY":3.843024291539115,"maxX":135.094557,"maxY":63.67205987533639,"scale":16.914863997474615,"ox":145.12297609491065,"oy":1168},mapBounds={"minX":145.12297609491065,"minY":155.9999999999999,"maxX":1186.8770239050893,"maxY":1168};
-applyTheme(savedTheme()||(themeMedia.matches?'dark':'light'));
+applyTheme(themePreference||(themeMedia.matches?'dark':'light'));
 function fmt(value){return Number(value).toLocaleString('zh-CN')} function fmtWan(value){return Number((Number(value)/10000).toFixed(1)).toLocaleString('zh-CN',{maximumFractionDigits:1})+'万'} function escapeHtml(value){return String(value??'').replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]))}
 function isInherited(r){return !!(r&& (r.inherited||r.dataLevel==='city-inherited'||String(r.quality||'').includes('用于区县底色')))} function isSupplement(r){return !!(r&&(r.dataLevel==='district-supplement'||(r.supplemental&&!isInherited(r))))} function marketText(r){if(!r?.price)return '';if(r.priceType==='new')return '新房';if(r.priceType==='new-estimated')return '新房估算';if(r.priceType==='resale')return '挂牌/二手';if(r.priceType==='resale-estimated')return '挂牌估算';return '房价'} function levelText(r){if(!r?.price)return '';if(isInherited(r))return marketText(r)+'市均';if(r.priceType==='new'||r.priceType==='new-estimated'||r.priceType==='resale'||r.priceType==='resale-estimated')return marketText(r);if(isSupplement(r))return '补充数据';if(r.dataLevel==='district'||String(r.quality||'').includes('区县'))return '区县数据';if(r.dataLevel==='city')return '城市数据';return '公开数据'} function levelClass(r){return isInherited(r)?'levelBadge inherited':(r.priceType==='new'?'levelBadge new':(r.priceType==='new-estimated'||r.priceType==='resale-estimated'||isSupplement(r)?'levelBadge supplement':(r.dataLevel==='district'||String(r.quality||'').includes('区县')?'levelBadge district':'levelBadge')))} function labelText(r){return escapeHtml(r.label)+' '+fmtWan(r.price)+(r.priceType==='resale-estimated'?' 估':'')+(isInherited(r)?' 市均':'')} function referenceLine(r){const parts=[];if(r.resalePrice)parts.push('挂牌/二手'+(r.resalePriceEstimated?'估算':'')+' '+fmt(r.resalePrice)+' 元/㎡');if(r.newPrice)parts.push('新房'+(r.newPriceEstimated?'估算':'')+' '+fmt(r.newPrice)+' 元/㎡');return parts.join(' · ')} function sourceLine(r){const estimate=(r.priceType==='resale-estimated'||r.priceType==='new-estimated'||r.newPriceEstimated||r.resalePriceEstimated)?r.estimateBasis:'';return [levelText(r),r.quality,r.source,estimate].filter(Boolean).join(' · ')}
 function applyOverlayOpacity(){document.documentElement.style.setProperty('--overlay-opacity',overlayOpacity.toFixed(2));overlayOpacityValue.textContent=Math.round(overlayOpacity*100)+'%'} function applyLabelScale(){document.documentElement.style.setProperty('--label-scale',labelScale.toFixed(2));labelScaleValue.textContent=Math.round(labelScale/labelScaleBase*100)+'%';scheduleTransform({forceLabels:true})} function applyMapLabelVisibility(){cityLabels.style.display=labelsVisible&&state.scale<2.55?'':'none';detailLabelEls.forEach(label=>label.el.style.display=labelsVisible&&state.scale>=label.minScale?'block':'none');toggleLabelsButton.textContent=labelsVisible?'隐藏标注':'显示标注';toggleLabelsButton.classList.toggle('active',labelsVisible)}
