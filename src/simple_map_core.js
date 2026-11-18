@@ -570,6 +570,11 @@ function createInteractiveMap(config) {
   .brandBlock h1 { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; white-space: nowrap; flex-shrink: 0; }
   .brandMeta { font-size: 12px; color: var(--ink-secondary); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .liveDot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; display: inline-block; flex-shrink: 0; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18); }
+  .brandGuideLink { height: 25px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--brand); background: var(--brand-soft); color: var(--brand-ink); font-size: 12px; font-weight: 800; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; flex-shrink: 0; transition: background 0.15s, color 0.15s; }
+  .brandGuideLink:hover { background: var(--brand); color: #ffffff; }
+  [data-theme="dark"] .brandGuideLink:hover { color: #06131c; }
+  .brandGuideLink svg { width: 13.5px; height: 13.5px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+  .brandGuideLink i { font-style: normal; font-size: 11px; opacity: 0.85; }
 
   .metricTabs { display: inline-flex; padding: 3px; gap: 2px; width: fit-content; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
   .metricTabs::-webkit-scrollbar { display: none; }
@@ -873,6 +878,9 @@ function createInteractiveMap(config) {
   .popDivider { height: 1px; background: var(--line); margin: 4px 0; }
   .popActionsGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .popActionsGrid .toolBtn { width: 100%; justify-content: center; height: 31px; font-size: 12px; border: 1px solid var(--line); }
+  .popLinksRow { display: flex; flex-direction: column; gap: 5px; }
+  .popExtLink { display: flex; justify-content: space-between; align-items: center; padding: 6px 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-subtle); color: var(--ink-secondary); font-size: 12px; font-weight: 750; text-decoration: none; transition: border-color 0.14s, color 0.14s, background 0.14s; }
+  .popExtLink:hover { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
 
   /* Filter & Ranking Controls */
   .filterBlock { display: flex; flex-direction: column; gap: 8px; }
@@ -918,6 +926,17 @@ function createInteractiveMap(config) {
   .iconAct:hover { border-color: var(--brand); color: var(--brand-ink); }
   .iconAct.inCompare { background: var(--brand); color: #fff; border-color: var(--brand); }
 
+  .authorCard { border: 1px solid var(--line-strong); background: var(--bg-subtle); border-radius: 11px; padding: 12px 13px; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+  .authorHead { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink); }
+  .authorTag { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 999px; background: var(--brand-soft); border: 1px solid var(--brand); color: var(--brand-ink); font-size: 11px; font-weight: 800; letter-spacing: 0.02em; }
+  .authorDesc { margin: 0; font-size: 12px; color: var(--ink-secondary); line-height: 1.58; }
+  .authorLinks { display: flex; flex-wrap: wrap; gap: 6px; }
+  .authorLink { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line-strong); background: var(--bg-panel); color: var(--ink-secondary); font-size: 12px; font-weight: 750; text-decoration: none; white-space: nowrap; transition: border-color 0.14s, background 0.14s, color 0.14s; }
+  .authorLink:hover { border-color: var(--brand); color: var(--brand-ink); }
+  .authorLink.primary { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); font-weight: 800; }
+  .authorLink.primary:hover { background: var(--brand); color: #ffffff; }
+  [data-theme="dark"] .authorLink.primary:hover { color: #06131c; }
+
   .notes { border-top: 1px solid var(--line); padding-top: 12px; font-size: 12.5px; color: var(--ink-muted); line-height: 1.68; }
 
   /* Comparison Drawer */
@@ -959,6 +978,8 @@ function createInteractiveMap(config) {
     .brandBlock { padding: 6px 10px; gap: 6px; }
     .brandBlock h1 { font-size: 16px; }
     .brandMeta { display: none; }
+    .brandGuideLink { height: 23px; padding: 0 7px; font-size: 11px; }
+    .brandGuideLink svg { width: 12px; height: 12px; }
     .metricTabs { overflow-x: auto; max-width: 100%; flex-wrap: nowrap; }
     .metricTab { height: 27px; padding: 0 8px; font-size: 11.5px; }
     .presetBar { overflow-x: auto; max-width: 100%; flex-wrap: nowrap; padding-bottom: 2px; }
@@ -992,6 +1013,7 @@ function createInteractiveMap(config) {
       <div class="brandBlock hudCard">
         <h1>${esc(config.title)}</h1>
         <div class="brandMeta"><span class="liveDot"></span><span>${esc(config.updateLine)}</span></div>
+        <a class="brandGuideLink" href="https://heroliss.github.io/liss-works/projects/china-house-price-map/" target="_blank" rel="noopener" title="查看四步上手演示、功能亮点与作者作品站 (Liss Works)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.4 2.4 0 1 1 3.5 2.1c-.7.4-1.1.8-1.1 1.7"/><circle cx="12" cy="16.8" r="0.9" fill="currentColor" stroke="none"/></svg><span>上手指南</span><i aria-hidden="true">↗</i></a>
       </div>
     </div>
 
@@ -1018,6 +1040,11 @@ function createInteractiveMap(config) {
           <button class="toolBtn active" id="toggleLabels" title="显示或隐藏地图文字标注" aria-label="切换标注">标注显示</button>
           <button class="toolBtn active" id="toggleFineMode" title="放大时自动展开区县、街道与小区" aria-label="自动下钻细化">街道细化</button>
           <button class="toolBtn" id="exportPng" title="导出当前地图高清PNG图片" aria-label="导出高清图">导出图片</button>
+        </div>
+        <div class="popDivider"></div>
+        <div class="popLinksRow">
+          <a class="popExtLink" href="https://heroliss.github.io/liss-works/projects/china-house-price-map/" target="_blank" rel="noopener"><span>四步上手指南与项目介绍</span><span>↗</span></a>
+          <a class="popExtLink" href="https://heroliss.github.io/liss-works/" target="_blank" rel="noopener"><span>作者个人作品站 · Liss Works</span><span>↗</span></a>
         </div>
       </div>
 
@@ -1194,6 +1221,15 @@ function createInteractiveMap(config) {
       </div>
 
       <div id="rows" class="rows"></div>
+      <div class="authorCard">
+        <div class="authorHead"><span class="authorTag">Liss Works</span><strong>关于本图与快速上手</strong></div>
+        <p class="authorDesc">由 Liss 独立设计与开发。初次使用可先看四步交互演示与找房教学，也欢迎访问我的个人作品站查看更多工具与作品。</p>
+        <div class="authorLinks">
+          <a class="authorLink primary" href="https://heroliss.github.io/liss-works/projects/china-house-price-map/" target="_blank" rel="noopener">四步上手指南 ↗</a>
+          <a class="authorLink" href="https://heroliss.github.io/liss-works/" target="_blank" rel="noopener">更多作品 · Liss Works ↗</a>
+          <a class="authorLink" href="https://github.com/heroliss/china-house-price-map" target="_blank" rel="noopener">GitHub 源码 ↗</a>
+        </div>
+      </div>
       <div class="notes">${config.notesHtml || ""}</div>
     </div>
   </aside>

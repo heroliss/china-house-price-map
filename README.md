@@ -2,7 +2,8 @@
 
 覆盖全国 34 个省级行政区、**372 个地级/直辖/特区/直管市单元（100% 覆盖）**、**3,296 个区县/乡镇/堂区单元（100% 着色覆盖，含 905 个核心区县实测多维基本面）**、**78 城 3,675 个核心街道/商圈板块房价样本** 与 **按需混合获取的代表小区体检与局部置业诊断引擎** 的渐进式空间房产决策工作台，支持本地混合服务与 GitHub Pages 纯静态部署。
 
-- **主入口**：`index.html` / `china.html`
+- **在线地图**：<https://heroliss.github.io/china-house-price-map/>（本地入口 `index.html` / `china.html`）
+- **图文指南与作品详情页（Liss Works）**：<https://heroliss.github.io/liss-works/projects/china-house-price-map/>
 - **兼容跳转**：`gba.html`、`jingjinji.html`、`yangtze-delta.html`、`chengyu.html`、`middle-yangtze.html`、`west-coast.html`、`shandong-peninsula.html` 自动平滑跳转至全国地图对应城市群视角
 
 ## 核心特性
