@@ -325,11 +325,16 @@ function renderCommunityPins() {
   }
 
   const inv = 1 / state.scale;
+  const curPlace = activeId ? placeById.get(activeId) : null;
+  const isRent = typeof userIntent !== "undefined" && userIntent === "rent";
   communityPinLayer.innerHTML = pinned.map(xq => {
     const pt = projectLonLat(xq.lng, xq.lat);
-    const txt = `${xq.name.slice(0, 7)} ${xq.price ? fmtWan(xq.price) : ""}`.trim();
+    const valStr = isRent && xq.price && typeof estMonthlyRentFromUnit === "function"
+      ? fmtRentShort(estMonthlyRentFromUnit(xq.price, xq.estRentYield || effectiveRentYield(curPlace)))
+      : (xq.price ? fmtWan(xq.price) : "");
+    const txt = `${xq.name.slice(0, 7)} ${valStr}`.trim();
     const w = Math.round(txt.length * 8.6 + 18);
-    return '<g class="xqPinNode' + (xq.isSelected ? " active" : "") + '" data-xqid="' + xq.id + '" data-xqc="' + xq.c + '" transform="translate(' + pt.x.toFixed(2) + " " + pt.y.toFixed(2) + ") scale(" + inv.toFixed(5) + ')">' +
+    return '<g class="xqPinNode' + (xq.isSelected ? " active" : "") + '" data-xqid="' + xq.id + '" data-xqc="' + xq.c + '" transform="translate(' + pt.x.toFixed(2) + " " + pt.y.toFixed(2) + ") scale(" + inv.toFixed(6) + ')">' +
       '<polygon points="-5,-2 5,-2 0,5" fill="' + (xq.isSelected ? "var(--brand)" : "#0f222d") + '"></polygon>' +
       '<rect class="xqPinBg" x="' + (-w / 2).toFixed(1) + '" y="-21" width="' + w + '" height="19" rx="5"></rect>' +
       '<text class="xqPinTxt" x="0" y="-7.8" text-anchor="middle">' + escapeHtml(txt) + "</text></g>";
@@ -348,6 +353,7 @@ async function inspectCommunityItem(r, dp, item, fly = true) {
   renderXqSubPanel(r, dp);
   renderBuyingAdviceUI(r);
   renderCommunityPins();
+  if (typeof updateNavBreadcrumb === "function") updateNavBreadcrumb();
   if (fly && det.lng && det.lat) {
     focusLonLat(det.lng, det.lat, Math.max(state.scale, 28), true);
   }
@@ -635,10 +641,12 @@ function renderXqSubPanel(r, dp) {
     return;
   }
 
+  const isRent = typeof userIntent !== "undefined" && userIntent === "rent";
+  const useYld = typeof effectiveRentYield === "function" ? effectiveRentYield(r) : 2.1;
   const specHtml = selectedCommunityDetail ? renderCommunitySpecCardHtml(selectedCommunityDetail, scope.refPrice) : "";
   mount.innerHTML =
     '<div class="xqBox">' +
-      '<div class="plateHead"><span>「' + escapeHtml(scope.label) + '」代表小区 (' + activePlateCommunities.length + ')</span><small>' + escapeHtml(activePlateSourceTag) + ' · 点击落图体检</small></div>' +
+      '<div class="plateHead"><span>「' + escapeHtml(scope.label) + '」代表小区 (' + activePlateCommunities.length + ')</span><small>' + escapeHtml(activePlateSourceTag) + ' · 点击看楼龄与落图</small></div>' +
       specHtml +
       '<div class="xqRows">' +
       activePlateCommunities.map((it, idx) => {
@@ -647,13 +655,16 @@ function renderXqSubPanel(r, dp) {
           ? `<span class="levelBadge district">低${Math.abs(diff)}%</span>`
           : diff >= 12
             ? `<span class="levelBadge supplement">高${diff}%</span>`
-            : `<span class="levelBadge">均价带</span>`;
+            : `<span class="levelBadge">适中</span>`;
         const isAct = selectedCommunityDetail && selectedCommunityDetail.id === it.id;
+        const dispPrice = isRent && typeof estMonthlyRentFromUnit === "function"
+          ? fmtRentShort(estMonthlyRentFromUnit(it.p, useYld))
+          : fmtWan(it.p);
         return '<div class="xqRow' + (isAct ? " active" : "") + '" data-xq-idx="' + idx + '">' +
           '<span class="rankNum">' + (idx + 1) + '</span>' +
           '<span class="xqName">' + escapeHtml(it.n) + '</span>' +
           alphaBadge +
-          '<span class="price">' + fmtWan(it.p) + '</span>' +
+          '<span class="price">' + dispPrice + '</span>' +
           '<span class="iconAct">' + (loadingCommunityId === it.id ? "加载..." : "体检") + '</span></div>';
       }).join("") +
       '</div></div>';
@@ -794,7 +805,8 @@ function generateQuantitativeAdvice(r) {
 function renderBuyingAdviceUI(r) {
   const mount = document.getElementById("adviceMount");
   if (!mount) return;
-  const diag = generateQuantitativeAdvice(r);
+  const isRent = typeof userIntent !== "undefined" && userIntent === "rent" && typeof generateRentalAdvice === "function";
+  const diag = isRent ? generateRentalAdvice(r) : generateQuantitativeAdvice(r);
   if (!diag) { mount.innerHTML = ""; return; }
 
   let savedAi = { url: "https://api.deepseek.com/chat/completions", model: "deepseek-chat", key: "", brief: "" };
@@ -804,15 +816,23 @@ function renderBuyingAdviceUI(r) {
   } catch (_) {}
 
   const altHtml = diag.alts.length
-    ? '<li><b>25km通勤平替：</b>若预算受限，周边可重点对比 ' +
-      diag.alts.map(a => `<button type="button" class="linkBtn advAltBtn" data-id="${a.cand.id}">${escapeHtml(a.cand.city.replace(/市$/, "") + "·" + a.cand.name)}（${a.dKm.toFixed(0)}km · ${fmtWan(a.cand.price)} · 省${a.savePct}%）</button>`).join("、") +
+    ? '<li><b>25km通勤省钱平替：</b>若想进一步降低成本，周边可重点对比 ' +
+      diag.alts.map(a => {
+        const costTag = isRent && a.altRent ? `约¥${fmt(a.altRent)}/月` : fmtWan(a.cand.price);
+        return `<button type="button" class="linkBtn advAltBtn" data-id="${a.cand.id}">${escapeHtml(a.cand.city.replace(/市$/, "") + "·" + a.cand.name)}（${a.dKm.toFixed(0)}km · ${costTag} · 省${a.savePct}%）</button>`;
+      }).join("、") +
       "。</li>"
     : "";
+
+  const boxTitle = isRent ? `局部租住与租买建议 · ${diag.targetName}` : `局部置业诊断 · ${diag.targetName}`;
+  const aiPlaceholder = isRent
+    ? "输入您的租房需求：如 月租预算2500元、南山科技园上班、独居注重安静安全"
+    : "输入您的买房需求：如 总预算300万、海淀通勤、首套三房兼顾学区";
 
   mount.innerHTML =
     '<div class="adviceBox">' +
       '<div class="adviceHead">' +
-        '<span class="adviceTitle">局部置业诊断 · ' + escapeHtml(diag.targetName) + '</span>' +
+        '<span class="adviceTitle">' + escapeHtml(boxTitle) + '</span>' +
         '<span class="' + diag.verdictCls + '">' + escapeHtml(diag.verdict) + '</span>' +
       '</div>' +
       '<ul class="adviceList">' +
@@ -820,9 +840,9 @@ function renderBuyingAdviceUI(r) {
         altHtml +
       '</ul>' +
       '<details class="calcBox" style="padding:8px 10px">' +
-        '<summary><span>AI 定制看房顾问（结合个人需求与实测数据深度推演）</span><span>展开 ▾</span></summary>' +
+        '<summary><span>AI 定制' + (isRent ? "租房" : "看房") + '顾问（结合个人需求与实测数据深度推演）</span><span>展开 ▾</span></summary>' +
         '<div class="aiForm">' +
-          '<input id="aiUserBrief" class="aiInput" type="text" placeholder="输入您的需求：如 预算500万、南山科技园通勤、首套三房重学区" value="' + escapeHtml(savedAi.brief) + '">' +
+          '<input id="aiUserBrief" class="aiInput" type="text" placeholder="' + aiPlaceholder + '" value="' + escapeHtml(savedAi.brief) + '">' +
           '<div class="aiGrid2">' +
             '<input id="aiApiUrl" class="aiInput" type="url" placeholder="兼容OpenAI接口地址" value="' + escapeHtml(savedAi.url) + '">' +
             '<input id="aiApiModel" class="aiInput" type="text" placeholder="模型名 (如 deepseek-chat)" value="' + escapeHtml(savedAi.model) + '">' +
@@ -846,7 +866,7 @@ function renderBuyingAdviceUI(r) {
       const url = document.getElementById("aiApiUrl").value.trim();
       const model = document.getElementById("aiApiModel").value.trim();
       const key = document.getElementById("aiApiKey").value.trim();
-      const brief = document.getElementById("aiUserBrief").value.trim() || "自住兼顾保值，请给出客观选筹、谈判与避坑建议";
+      const brief = document.getElementById("aiUserBrief").value.trim() || (isRent ? "通勤方便、性价比高、民水民电，请给出租房选点与签约避坑建议" : "自住兼顾保值，请给出客观选筹、谈判与避坑建议");
       const outEl = document.getElementById("aiAdvisorOut");
       if (!key || !url) {
         showToast("请先填写兼容 OpenAI 格式的 API Key 与接口地址");
@@ -854,11 +874,12 @@ function renderBuyingAdviceUI(r) {
       }
       try { localStorage.setItem("atlas-ai-cfg", JSON.stringify({ url, model, key, brief })); } catch (_) {}
       outEl.style.display = "block";
-      outEl.textContent = "正在结合当前区域、板块与小区的实测多维数据推演置业方案...";
+      outEl.textContent = "正在结合当前区域、板块与小区的实测多维数据为您推演方案...";
       runBtn.disabled = true;
 
       const contextPacket = {
-        region: { province: r.province, city: r.city, name: r.name, resalePrice: r.price, newPrice: r.newPrice, yoy: r.yoy, rentYield: r.rentYield, priceToIncome: r.priceToIncome, drawdownFromPeakPct: r.drawdownPct },
+        intent: isRent ? "租房居住" : "买房置业",
+        region: { province: r.province, city: r.city, name: r.name, resalePrice: r.price, newPrice: r.newPrice, yoy: r.yoy, rentYield: r.rentYield, estMonthlyRent2BR: typeof estPlaceMonthlyRent === "function" ? estPlaceMonthlyRent(r, "two") : null, priceToIncome: r.priceToIncome, drawdownFromPeakPct: r.drawdownPct },
         selectedStreetPlate: selectedPlateInfo?.distId === r.id ? { name: selectedPlateInfo.n, price: selectedPlateInfo.p, mom: selectedPlateInfo.m } : null,
         topCommunitiesInPlate: activePlateCommunities.slice(0, 8).map(c => ({ name: c.n, price: c.p, mom: c.m })),
         selectedCommunity: selectedCommunityDetail ? { name: selectedCommunityDetail.name, price: selectedCommunityDetail.price, year: selectedCommunityDetail.year, plotRatio: selectedCommunityDetail.plotRatio, greenRate: selectedCommunityDetail.greenRate, archType: selectedCommunityDetail.archType, propertyFee: selectedCommunityDetail.propertyFee, estRentYield: selectedCommunityDetail.estRentYield } : null,
@@ -866,6 +887,9 @@ function renderBuyingAdviceUI(r) {
       };
 
       try {
+        const sysPrompt = isRent
+          ? "你是一位贴心、客观的中国城市租房与居住规划顾问。必须严格依据提供的实测JSON数据作答，严禁编造虚假租金。请分4点通俗易懂地输出：1.房租预算与通勤匹配度；2.候选街道/小区租住优缺点；3.租房vs买房现阶段建议；4.看房签约防坑要点与周边省钱平替。"
+          : "你是一位严谨、客观的中国房产空间数据分析师。必须严格依据提供的实测JSON数据作答，严禁编造虚假房价。请分4点通俗易懂地输出：1.预算与板块匹配度；2.候选小区优劣势与挑房要点；3.议价与时机策略；4.通勤平替方案。";
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
@@ -873,8 +897,8 @@ function renderBuyingAdviceUI(r) {
             model,
             temperature: 0.35,
             messages: [
-              { role: "system", content: "你是一位严谨、客观的中国房产空间数据分析师。必须严格依据提供的实测JSON数据作答，严禁编造虚假房价。请分4点简明输出：1.预算与板块匹配度；2.候选小区优劣势与挑房要点；3.议价与时机策略；4.通勤平替方案。" },
-              { role: "user", content: `购房者需求：${brief}\n当前局部实测数据JSON：${JSON.stringify(contextPacket)}` },
+              { role: "system", content: sysPrompt },
+              { role: "user", content: `用户需求：${brief}\n当前局部实测数据JSON：${JSON.stringify(contextPacket)}` },
             ],
           }),
         });

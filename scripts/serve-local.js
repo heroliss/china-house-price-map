@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const { TextDecoder } = require("util");
 const { parsePlateCommunitiesHtml, parseXfEstatesFallbackHtml, parseCommunityDetailHtml } = require("../src/xiaoqu_parser");
+const { wgs84ToGcj02 } = require("../src/china_map_shared");
 
 const ROOT = path.resolve(__dirname, "..");
 const PORT = Number(process.env.PORT || process.argv[2] || 8788);
@@ -22,11 +23,11 @@ const MIME = {
   ".ico": "image/x-icon",
 };
 
-let diskCache = { plates: {}, details: {}, cityIndex: {}, districts: {} };
+let diskCache = { plates: {}, details: {}, cityIndex: {}, districts: {}, pois: {} };
 try {
   if (fs.existsSync(CACHE_FILE)) {
     const loaded = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
-    diskCache = { plates: {}, details: {}, cityIndex: {}, districts: {}, ...loaded };
+    diskCache = { plates: {}, details: {}, cityIndex: {}, districts: {}, pois: {}, ...loaded };
   }
 } catch (_) {}
 
@@ -73,6 +74,43 @@ function sendJson(res, status, obj) {
 const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
+
+    // On-demand API -1: Arbitrary POI / Landmark / Subway / Building Geocoding (WGS84 -> GCJ02)
+    if (u.pathname === "/api/poi") {
+      const q = String(u.searchParams.get("q") || "").trim().slice(0, 80);
+      if (!q) return sendJson(res, 400, { error: "empty_query" });
+      const cachedPoi = diskCache.pois?.[q];
+      if (cachedPoi && Date.now() - cachedPoi.ts < TTL_MS) {
+        return sendJson(res, 200, { ok: true, cached: true, results: cachedPoi.results });
+      }
+      const ctrl = new AbortController();
+      const tm = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const nomRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=cn,hk,mo,tw&accept-language=zh-CN&q=${encodeURIComponent(q)}`, {
+          headers: { "User-Agent": "ChinaHousePriceAtlas/2.0 (local-research)" },
+          signal: ctrl.signal,
+        });
+        const arr = nomRes.ok ? await nomRes.json() : [];
+        const results = (Array.isArray(arr) ? arr : []).map(it => {
+          const wLon = Number(it.lon), wLat = Number(it.lat);
+          const isTw = wLon >= 119.8 && wLon <= 122.3 && wLat >= 21.7 && wLat <= 25.5;
+          const [gLon, gLat] = isTw ? [wLon, wLat] : wgs84ToGcj02([wLon, wLat]);
+          const parts = String(it.display_name || "").split(",").map(s => s.trim()).filter(Boolean);
+          return {
+            name: parts[0] || q,
+            sub: parts.slice(1, 4).join(" · "),
+            lon: gLon,
+            lat: gLat,
+          };
+        });
+        if (!diskCache.pois) diskCache.pois = {};
+        diskCache.pois[q] = { ts: Date.now(), results };
+        scheduleSaveCache();
+        return sendJson(res, 200, { ok: true, cached: false, results });
+      } finally {
+        clearTimeout(tm);
+      }
+    }
 
     // On-demand API 0: City + District -> Discover District Slug, Street Plates & District Communities
     if (u.pathname === "/api/district") {
@@ -216,7 +254,7 @@ const server = http.createServer(async (req, res) => {
       const ext = path.extname(filePath).toLowerCase();
       res.writeHead(200, {
         "Content-Type": MIME[ext] || "application/octet-stream",
-        "Cache-Control": "no-cache",
+        "Cache-Control": "no-store, no-cache, must-revalidate",
       });
       res.end(buf);
     });

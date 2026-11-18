@@ -620,9 +620,9 @@ function main() {
   const streetDirCount = streetPlatesMeta.officialStreetDistrictCount || Object.keys(streetPlatesMeta.officialStreets || {}).length;
 
   const html = createInteractiveMap({
-    pageTitle: "中国房价交互舆图 · 全国城市、区县与街道板块七维空间决策台",
+    pageTitle: "中国房价交互舆图 · 全国城市、区县、街道与小区八维买房租房决策台",
     title: "中国房价交互舆图",
-    subtitle: `覆盖全国34省市区、372城、${detailRegionCount}个区县镇街及${plateCount}+核心街道商圈板块；支持七维指标、12月时光机回放、通勤圈测距与智能选房`,
+    subtitle: `覆盖全国34省市区、372城、${detailRegionCount}个区县镇街及${plateCount}+核心街道商圈；支持买房/租房双视角、八维指标、任意起点自适应通勤圈与智能找房`,
     updateLine: `${matched}城 · ${detailRegionCount}区县 · ${plateCount}街道板块 · ${fetchedAt.slice(0, 10)}`,
     sideTitle: "全国区域分析台",
     width: 1800,
@@ -635,7 +635,7 @@ function main() {
     outlines,
     labelCenters: PROVINCE_LABEL_CENTERS,
     getRecord,
-    maxScale: 180,
+    maxScale: 2400,
     maxDetailLoadsPerPass: 6,
     showPresetButtons: true,
     initialView: { center: [105.2, 35.4], scale: 1.26 },
@@ -653,7 +653,7 @@ function main() {
     notesHtml: `
       <b>多源融合与同源标尺校准：</b>城市与区县二手挂牌均价以禧泰数据/中国房价行情为主标尺，深度融合聚汇数据（${realNewCount} 城 + <b>${realDistFundCount} 个核心区县</b>独立实测在售新房均价、同比、租售比、房价收入比、十年峰值回撤及 ${trendSeriesCount} 条月度走势）与房天下核心街道/商圈样本（${plateCount} 个街道板块均经同城配对中位系数校准）。<br>
       <b>港澳台细分折算：</b>香港 18 区按差估署（RVD）与中原指数（CCL）折算人民币/㎡；澳门 8 堂区按统计暨普查局（DSEC）折算；台湾细化至 366 个乡镇市区，按内政部实价登录折算。<br>
-      <b>空间决策工具箱：</b>支持 <b>七维着色切换</b>（含十年峰值回撤与一二手价差）、<b>近12个月时光机动态回放</b>、<b>15/30/50km 都市通勤圈测距与跨区洼地雷达</b>、<b>智能选房综合评分</b> 及 <b>多区域走势同图指数对比</b>。<br>
+      <b>空间决策工具箱：</b>支持 <b>八维着色切换</b>（含四户型实时月租参考、十年峰值回撤与一二手价差）、<b>买房/租房双视角与3步新手智能找房</b>、<b>任意起点+随缩放13档自适应通勤圈（800km至100m）</b>、<b>近12个月时光机动态回放</b> 及 <b>多区域走势同图指数对比</b>。<br>
       <b>防拦截与快照兜底：</b>采集脚本内置礼貌节流、403/429/验证码熔断保护与 Last-Known-Good 历史快照兜底，每周一自动更新；最近生成 ${generatedAtText}。
     `,
   });

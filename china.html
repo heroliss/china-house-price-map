@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="覆盖全国34省市区、372城、3296个区县镇街及3675+核心街道商圈板块；支持七维指标、12月时光机回放、通勤圈测距与智能选房">
-<title>中国房价交互舆图 · 全国城市、区县与街道板块七维空间决策台</title>
+<meta name="description" content="覆盖全国34省市区、372城、3296个区县镇街及3675+核心街道商圈；支持买房/租房双视角、八维指标、任意起点自适应通勤圈与智能找房">
+<title>中国房价交互舆图 · 全国城市、区县、街道与小区八维买房租房决策台</title>
 <style>
   :root {
     --bg-ocean: #e6eff5;
@@ -134,8 +134,21 @@
   .profileBtn.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
   .profileBtn small { display: block; font-size: 11px; font-weight: 600; color: var(--ink-muted); margin-top: 2px; }
 
-  .radiusPanel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 12; width: 336px; padding: 12px 14px; display: none; flex-direction: column; gap: 9px; }
+  .radiusPanel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 12; width: 372px; padding: 12px 14px; display: none; flex-direction: column; gap: 9px; }
   .radiusPanel.open { display: flex; }
+  .poiSearchRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+  .poiCandList { display: flex; flex-direction: column; gap: 4px; background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 8px; padding: 8px; max-height: 136px; overflow-y: auto; }
+  .poiCandItem { border: 0; background: var(--bg-panel); border-radius: 6px; padding: 6px 8px; text-align: left; font-size: 12px; color: var(--ink); cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+  .poiCandItem:hover { background: var(--brand-soft); color: var(--brand-ink); }
+  .poiCandItem small { font-size: 11px; color: var(--ink-muted); }
+  .commuteActionRow { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .commuteActionRow .miniBtn { flex: 1 1 auto; justify-content: center; height: 28px; font-size: 12px; }
+  .ringModeBar { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+  .ringModeBtn { flex: 1 1 auto; border: 1px solid var(--line); background: var(--bg-subtle); color: var(--ink-secondary); height: 26px; padding: 0 6px; border-radius: 6px; font-size: 11.5px; font-weight: 750; cursor: pointer; white-space: nowrap; }
+  .ringModeBtn:hover, .ringModeBtn.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); font-weight: 800; }
+  .commuteOriginPin { cursor: grab; }
+  .commuteOriginPin:active, svg.draggingPin .commuteOriginPin { cursor: grabbing; }
+  svg.commuteFreeClick { cursor: crosshair; }
   .ringStatGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
   .ringStatCell { background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 7px; padding: 6px 7px; text-align: center; }
   .ringStatCell span { display: block; font-size: 11px; color: var(--ink-muted); }
@@ -327,6 +340,62 @@
   .aiGrid2 { display: grid; grid-template-columns: 1.3fr 1fr; gap: 6px; }
   .aiOutput { background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 7px; padding: 9px 10px; font-size: 12px; line-height: 1.6; color: var(--ink); white-space: pre-wrap; max-height: 280px; overflow-y: auto; }
 
+  /* Dual-Persona Mode Bar & Beginner 3-Step Matchmaker */
+  .intentBar { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; padding: 5px; background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 10px; align-items: center; }
+  .intentBtn { border: 0; background: transparent; color: var(--ink-secondary); height: 32px; border-radius: 7px; font-size: 12.5px; font-weight: 800; cursor: pointer; transition: background 0.15s, color 0.15s; }
+  .intentBtn:hover { color: var(--ink); }
+  .intentBtn.active { background: var(--bg-panel); color: var(--brand-ink); box-shadow: 0 1px 3px rgba(15, 34, 45, 0.08); }
+  .intentActionBtn { border: 1px solid var(--brand); background: var(--brand-soft); color: var(--brand-ink); height: 32px; padding: 0 12px; border-radius: 7px; font-size: 12.5px; font-weight: 800; cursor: pointer; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+  .intentActionBtn:hover, .intentActionBtn.active { background: var(--brand); color: #ffffff; }
+
+  .mmBox { background: var(--bg-panel); border: 1px solid var(--brand); border-radius: 11px; padding: 11px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .mmHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+  .mmHead strong { display: block; font-size: 14px; font-weight: 800; color: var(--ink); }
+  .mmSub { display: block; font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+  .mmStep { display: flex; flex-direction: column; gap: 6px; }
+  .mmStepLabel { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; font-weight: 750; color: var(--ink); }
+  .mmStepLabel b { font-size: 12px; font-weight: 800; color: var(--brand-ink); }
+  .mmWorkRow { display: grid; grid-template-columns: minmax(0, 1fr) 114px; gap: 6px; }
+  .mmSelect { height: 32px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg-subtle); padding: 0 6px; font-size: 12px; font-weight: 700; color: var(--ink); }
+  .mmSpotRow { display: flex; flex-wrap: wrap; gap: 5px; }
+  .mmSpotChip { border: 1px solid var(--line); background: var(--bg-subtle); color: var(--ink-secondary); border-radius: 999px; height: 25px; padding: 0 9px; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .mmSpotChip:hover, .mmSpotChip.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
+  .mmRange { width: 100%; accent-color: var(--brand); cursor: pointer; }
+  .mmPillRow { display: flex; flex-wrap: wrap; gap: 5px; }
+  .mmOptBtn { flex: 1 1 auto; border: 1px solid var(--line); background: var(--bg-subtle); color: var(--ink-secondary); height: 28px; padding: 0 8px; border-radius: 7px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+  .mmOptBtn:hover, .mmOptBtn.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); font-weight: 800; }
+  .mmSubmitBtn { border: 0; background: var(--brand); color: #ffffff; height: 35px; border-radius: 8px; font-size: 13px; font-weight: 800; cursor: pointer; transition: opacity 0.15s; }
+  .mmSubmitBtn:hover { opacity: 0.92; }
+  .mmSubmitBtn:disabled { opacity: 0.6; cursor: wait; }
+  .mmResHead { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; font-weight: 800; color: var(--ink); padding-top: 6px; border-top: 1px solid var(--line); }
+  .mmResHead small { font-size: 11.5px; font-weight: 600; color: var(--ink-muted); }
+  .mmResList { display: flex; flex-direction: column; gap: 6px; max-height: 256px; overflow-y: auto; padding-right: 2px; }
+  .mmResCard { border: 1px solid var(--line); background: var(--bg-subtle); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; cursor: pointer; transition: border-color 0.14s, background 0.14s; }
+  .mmResCard:hover { border-color: var(--brand); background: var(--brand-soft); }
+  .mmResTop { display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 13px; }
+  .mmResTop small { font-size: 11.5px; color: var(--ink-muted); font-weight: 600; margin-left: 4px; }
+  .mmScoreBadge { background: var(--brand-soft); color: var(--brand-ink); border: 1px solid var(--brand); border-radius: 999px; padding: 2px 7px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+  .mmResMid { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; }
+  .mmResMid b { color: var(--ink); font-weight: 800; font-size: 13px; }
+  .mmResMid span { color: var(--ink-secondary); font-size: 12px; }
+  .mmResFoot { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-muted); }
+  .mmGoTxt { color: var(--brand-ink); font-weight: 800; white-space: nowrap; }
+  .mmEmpty { font-size: 12.5px; color: var(--ink-muted); padding: 8px; background: var(--bg-subtle); border-radius: 7px; }
+
+  /* Breadcrumb, Legend Plain-Language Guide & Rent Layout Switcher */
+  .navBreadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; padding: 6px 10px; font-size: 12px; max-width: 380px; }
+  .crumbBtn { border: 0; background: none; color: var(--brand-ink); font-size: 12px; font-weight: 750; padding: 1px 4px; border-radius: 4px; cursor: pointer; }
+  .crumbBtn:hover { background: var(--brand-soft); }
+  .crumbSep { color: var(--ink-muted); font-size: 12px; user-select: none; }
+  .crumbCur { color: var(--ink); font-weight: 800; padding: 1px 2px; }
+  .legendExplain { font-size: 12px; color: var(--ink-secondary); line-height: 1.45; margin: 2px 0 4px; }
+  .rentLayoutBar { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .rentLayoutBtn { border: 1px solid var(--line); background: var(--bg-panel); color: var(--ink-secondary); height: 26px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 750; cursor: pointer; }
+  .rentLayoutBtn:hover, .rentLayoutBtn.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); font-weight: 800; }
+  .popDivider { height: 1px; background: var(--line); margin: 4px 0; }
+  .popActionsGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .popActionsGrid .toolBtn { width: 100%; justify-content: center; height: 31px; font-size: 12px; border: 1px solid var(--line); }
+
   /* Filter & Ranking Controls */
   .filterBlock { display: flex; flex-direction: column; gap: 8px; }
   .searchRow { display: grid; grid-template-columns: minmax(0, 1fr) 126px; gap: 7px; }
@@ -454,21 +523,24 @@
         <button class="toolBtn" id="zoomOut" title="缩小地图 (-)" aria-label="缩小地图"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
         <button class="toolBtn" id="reset" title="回到初始全国视角 (R)" aria-label="重置视图"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg><span class="btnTxt">重置</span></button>
         <div class="toolSep"></div>
-        <button class="toolBtn active" id="toggleLabels" title="显示或隐藏地图标注" aria-label="切换标注"><svg viewBox="0 0 24 24"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg><span class="btnTxt">标注</span></button>
-        <button class="toolBtn active" id="toggleFineMode" title="开启或关闭区县及核心街道/商圈板块细化下钻" aria-label="区县与街道细化"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="btnTxt">街道细化</span></button>
-        <button class="toolBtn" id="toggleTiles" title="叠加高德真实道路与地形底图" aria-label="真实底图"><svg viewBox="0 0 24 24"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg><span class="btnTxt">底图</span></button>
+        <button class="toolBtn" id="toggleTiles" title="叠加高德真实道路与地铁生活底图" aria-label="真实底图"><svg viewBox="0 0 24 24"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg><span class="btnTxt">底图</span></button>
+        <button class="toolBtn" id="toggleRadius" title="15/30/50km 都市通勤圈与跨区低价洼地测距" aria-label="通勤圈测距"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg><span class="btnTxt">通勤圈</span></button>
         <button class="toolBtn" id="toggleTimeline" title="近12个月房价动态回放时光机" aria-label="时光轴回放"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg><span class="btnTxt">时光轴</span></button>
-        <button class="toolBtn" id="toggleRadius" title="15/30/50km 都市通勤圈与跨区价格洼地测距" aria-label="通勤圈测距"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg><span class="btnTxt">通勤圈</span></button>
-        <button class="toolBtn" id="toggleBudget" title="购房总预算与多因子智能选房评分" aria-label="智能选房"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 12 16.5 7.5"/><circle cx="12" cy="12" r="2"/></svg><span class="btnTxt">智能选房</span></button>
-        <button class="toolBtn" id="toggleDisplay" title="字号与透明度设置" aria-label="显示设置"><svg viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="18" y1="16" x2="22" y2="16"/></svg></button>
-        <button class="toolBtn" id="exportPng" title="导出当前地图高清PNG图片" aria-label="导出图片"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+        <button class="toolBtn" id="toggleBudget" title="按预算或置业模型在地图高亮筛选区域" aria-label="预算筛选"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 12 16.5 7.5"/><circle cx="12" cy="12" r="2"/></svg><span class="btnTxt">筛选</span></button>
+        <button class="toolBtn" id="toggleDisplay" title="显示设置、标注开关与导出高清图片" aria-label="显示与导出"><svg viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="18" y1="16" x2="22" y2="16"/></svg><span class="btnTxt">更多</span></button>
         <button class="toolBtn" id="toggleTheme" title="切换深色/浅色主题" aria-label="切换主题"><svg id="themeIcon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
         <button class="toolBtn" id="toggleSidebar" title="收起或展开右侧数据工作台" aria-label="收放侧栏"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg></button>
       </div>
 
       <div id="displayPopover" class="popoverPanel hudCard">
-        <div class="popRow"><label for="labelScale">标注大小</label><input id="labelScale" type="range" min="60" max="190" value="100"><span id="labelScaleValue">100%</span></div>
-        <div class="popRow"><label for="overlayOpacity">图层不透明</label><input id="overlayOpacity" type="range" min="15" max="100" value="75"><span id="overlayOpacityValue">75%</span></div>
+        <div class="popRow"><label for="labelScale">标注字号</label><input id="labelScale" type="range" min="60" max="190" value="100"><span id="labelScaleValue">100%</span></div>
+        <div class="popRow"><label for="overlayOpacity">色块不透明</label><input id="overlayOpacity" type="range" min="15" max="100" value="75"><span id="overlayOpacityValue">75%</span></div>
+        <div class="popDivider"></div>
+        <div class="popActionsGrid">
+          <button class="toolBtn active" id="toggleLabels" title="显示或隐藏地图文字标注" aria-label="切换标注">标注显示</button>
+          <button class="toolBtn active" id="toggleFineMode" title="放大时自动展开区县、街道与小区" aria-label="自动下钻细化">街道细化</button>
+          <button class="toolBtn" id="exportPng" title="导出当前地图高清PNG图片" aria-label="导出高清图">导出图片</button>
+        </div>
       </div>
 
       <div id="budgetPopover" class="budgetPanel hudCard">
@@ -492,8 +564,24 @@
       </div>
 
       <div id="radiusPopover" class="radiusPanel hudCard">
-        <div class="budgetHead"><span>都市通勤圈与测距仪</span><button id="closeRadius" class="linkBtn" type="button">关闭</button></div>
-        <div id="radiusAnchorInfo" class="budgetSummary">点击地图任意区域即可设为通勤圆心，自动测算 15/30/50km 房价梯度与价格洼地。</div>
+        <div class="budgetHead"><span id="radiusTitleSpan">都市通勤圈 · 任意点测距</span><button id="closeRadius" class="linkBtn" type="button">关闭</button></div>
+        <div class="poiSearchRow">
+          <input id="commutePoiInput" class="aiInput" type="text" placeholder="搜写字楼/地铁站/地名设圆心 (如 深圳湾科技生态园)">
+          <button id="commutePoiBtn" type="button" class="miniBtn active">设圆心</button>
+        </div>
+        <div id="commutePoiCandidates" class="poiCandList" style="display:none"></div>
+        <div class="commuteActionRow">
+          <button type="button" id="toggleFreeClickBtn" class="miniBtn active" title="开启后点击地图任意位置即可设为圆心，也可直接拖拽地图上的起点图钉">点图自由设圆心: 开</button>
+          <button type="button" id="commuteMyLocBtn" class="miniBtn" title="获取当前定位设为通勤圆心">定位当前处</button>
+        </div>
+        <div class="ringModeBar" role="group" aria-label="通勤圈半径档位">
+          <button type="button" class="ringModeBtn active" data-rmode="auto" title="随地图放大自动缩小通勤圈半径">自动</button>
+          <button type="button" class="ringModeBtn" data-rmode="micro">1/2/3km</button>
+          <button type="button" class="ringModeBtn" data-rmode="street">2/5/10km</button>
+          <button type="button" class="ringModeBtn" data-rmode="urban">5/10/20km</button>
+          <button type="button" class="ringModeBtn" data-rmode="metro">15/30/50km</button>
+        </div>
+        <div id="radiusAnchorInfo" class="budgetSummary">可直接点击地图任意位置、拖拽地图起点图钉或输入大厦名称设为圆心；放大地图自动切换至 1–10km 精细圈。</div>
         <div id="radiusRingStats" class="ringStatGrid"></div>
         <div id="radiusArbitrage" class="arbList"></div>
       </div>
@@ -501,13 +589,14 @@
     </div>
     <div class="hudSubStack">
       <div class="metricTabs hudCard" role="tablist" aria-label="地图指标切换">
-        <button class="metricTab active" role="tab" aria-selected="true" data-metric="resale">二手挂牌</button>
-        <button class="metricTab" role="tab" aria-selected="false" data-metric="newPrice">新房均价</button>
-        <button class="metricTab" role="tab" aria-selected="false" data-metric="yoy">同比涨跌</button>
-        <button class="metricTab" role="tab" aria-selected="false" data-metric="rentYield">租金回报</button>
-        <button class="metricTab" role="tab" aria-selected="false" data-metric="priceToIncome">房价收入比</button>
-        <button class="metricTab" role="tab" aria-selected="false" data-metric="drawdown">峰值回撤</button>
-        <button class="metricTab" role="tab" aria-selected="false" data-metric="spread">一二手价差</button>
+        <button class="metricTab active" role="tab" aria-selected="true" data-metric="resale" title="各地二手商品住宅挂牌参考均价">二手挂牌</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="newPrice" title="各地在售新建住宅参考均价">新房均价</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="estRent" title="按所选租住户型估算整月房租（元/月）">月租参考</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="yoy" title="与去年同期相比的房价涨跌幅">同比涨跌</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="rentYield" title="年租金除以房价的现金流回报率">租金回报</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="priceToIncome" title="当地普通家庭买一套90㎡住宅所需年数">房价收入比</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="drawdown" title="当前房价相比近十年最高点的回调幅度">峰值回撤</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="spread" title="新房相比同区二手房的倒挂或溢价幅度">一二手价差</button>
       </div>
       <div class="presetBar" aria-label="重点城市群快速定位"><button class="presetButton" data-preset="national">全国</button><button class="presetButton" data-preset="gba">大湾区</button><button class="presetButton" data-preset="yangtze-delta">长三角</button><button class="presetButton" data-preset="jingjinji">京津冀</button><button class="presetButton" data-preset="chengyu">成渝</button><button class="presetButton" data-preset="middle-yangtze">长江中游</button><button class="presetButton" data-preset="west-coast">闽台海峡</button><button class="presetButton" data-preset="shandong-peninsula">山东半岛</button><button class="presetButton" data-preset="hk-macau">港澳18区</button></div>
     </div>
@@ -534,6 +623,7 @@
         <g id="dynamicLabels"></g>
         <g id="streetPlateLayer"></g>
         <g id="communityPinLayer"></g>
+        <g id="commuteOriginLayer"></g>
       </g>
     </svg>
 
@@ -542,6 +632,7 @@
         <span id="legendTitle" class="legendTitle">二手住宅挂牌均价（万/㎡）</span>
         <span class="legendHint"><span id="legendFilterTip">点击色块筛选区间</span><button id="clearBinFilter" class="linkBtn" style="display:none" type="button">重置区间</button></span>
       </div>
+      <div id="legendExplain" class="legendExplain">颜色越暖代表二手房价越高；滚动滚轮放大地图会自动展开区县、街道与代表小区。</div>
       <div id="legendDistBar" class="legendDistBar" title="当前各色阶样本占比分布"></div>
       <div id="swatches" class="swatches"><button type="button" class="swatchBtn" data-bin="0" style="background:#2c5e8a" aria-label="筛选区间 <0.55万"></button><button type="button" class="swatchBtn" data-bin="1" style="background:#3f87b5" aria-label="筛选区间 0.55-0.8"></button><button type="button" class="swatchBtn" data-bin="2" style="background:#6bc0c4" aria-label="筛选区间 0.8-1.2"></button><button type="button" class="swatchBtn" data-bin="3" style="background:#bfe3b4" aria-label="筛选区间 1.2-1.8"></button><button type="button" class="swatchBtn" data-bin="4" style="background:#f5cf86" aria-label="筛选区间 1.8-3"></button><button type="button" class="swatchBtn" data-bin="5" style="background:#eb8a4c" aria-label="筛选区间 3-5.5"></button><button type="button" class="swatchBtn" data-bin="6" style="background:#c8413a" aria-label="筛选区间 5.5-9"></button><button type="button" class="swatchBtn" data-bin="7" style="background:#781530" aria-label="筛选区间 9万+"></button></div>
       <div id="legendLabels" class="legendLabels"><span><0.55万</span><span>0.55-0.8</span><span>0.8-1.2</span><span>1.2-1.8</span><span>1.8-3</span><span>3-5.5</span><span>5.5-9</span><span>9万+</span></div>
@@ -558,6 +649,7 @@
         </svg>
         <span class="scsLabel">南海诸岛</span>
       </div>
+      <nav id="navBreadcrumb" class="navBreadcrumb hudCard" aria-label="地图层级返回导航"><span class="crumbCur">全国总览</span></nav>
       <div id="scaleBadge" class="scaleBadge hudCard">城市级视图 · 放大自动加载区县</div>
       <div class="tileAttribution hudCard">底图 © 高德地图</div>
     </div>
@@ -571,8 +663,15 @@
     </div>
   </section>
 
-  <aside class="side" aria-label="区域房价数据与分析">
+  <aside class="side" aria-label="区域房价与租房决策工作台">
     <div class="sideScroll">
+      <div class="intentBar" role="tablist" aria-label="买房或租房模式切换">
+        <button type="button" class="intentBtn active" role="tab" aria-selected="true" data-intent="buy">买房置业</button>
+        <button type="button" class="intentBtn" role="tab" aria-selected="false" data-intent="rent">租房安居</button>
+        <button type="button" class="intentActionBtn" id="openMatchmakerBtn" title="填写预算与上班地点，自动筛选最适合您的片区">帮我找房</button>
+      </div>
+      <div id="matchmakerMount"></div>
+
       <div class="kpiWrap">
         <div class="kpiHeadRow">
           <span id="kpiScopeTitle">全国城市基准统计</span>
@@ -620,8 +719,8 @@
       <div class="notes">
       <b>多源融合与同源标尺校准：</b>城市与区县二手挂牌均价以禧泰数据/中国房价行情为主标尺，深度融合聚汇数据（363 城 + <b>905 个核心区县</b>独立实测在售新房均价、同比、租售比、房价收入比、十年峰值回撤及 1258 条月度走势）与房天下核心街道/商圈样本（3675 个街道板块均经同城配对中位系数校准）。<br>
       <b>港澳台细分折算：</b>香港 18 区按差估署（RVD）与中原指数（CCL）折算人民币/㎡；澳门 8 堂区按统计暨普查局（DSEC）折算；台湾细化至 366 个乡镇市区，按内政部实价登录折算。<br>
-      <b>空间决策工具箱：</b>支持 <b>七维着色切换</b>（含十年峰值回撤与一二手价差）、<b>近12个月时光机动态回放</b>、<b>15/30/50km 都市通勤圈测距与跨区洼地雷达</b>、<b>智能选房综合评分</b> 及 <b>多区域走势同图指数对比</b>。<br>
-      <b>防拦截与快照兜底：</b>采集脚本内置礼貌节流、403/429/验证码熔断保护与 Last-Known-Good 历史快照兜底，每周一自动更新；最近生成 2026-11-18 19:29 北京时间。
+      <b>空间决策工具箱：</b>支持 <b>八维着色切换</b>（含四户型实时月租参考、十年峰值回撤与一二手价差）、<b>买房/租房双视角与3步新手智能找房</b>、<b>任意起点+随缩放13档自适应通勤圈（800km至100m）</b>、<b>近12个月时光机动态回放</b> 及 <b>多区域走势同图指数对比</b>。<br>
+      <b>防拦截与快照兜底：</b>采集脚本内置礼貌节流、403/429/验证码熔断保护与 Last-Known-Good 历史快照兜底，每周一自动更新；最近生成 2026-11-18 23:28 北京时间。
     </div>
     </div>
   </aside>
@@ -649,7 +748,7 @@ const initialCenter = [105.2,35.4];
 const initialScale = 1.26;
 const projection = {"minX":73.502355,"minY":3.8399012854097303,"maxX":135.09567,"maxY":63.67205987533639,"scale":16.913981107316765,"ox":145.1059168764947,"oy":1168};
 const mapBounds = {"minX":145.1059168764947,"minY":156,"maxX":1186.8940831235054,"maxY":1168};
-const minScale = 0.72, maxScale = 180, maxDetailLoadsPerPass = 6;
+const minScale = 0.72, maxScale = 2400, maxDetailLoadsPerPass = 6;
 
 // ============================================================================
 // 4th-Tier On-Demand Community (Xiaoqu) Engine + 5D Buying Advisor + BYOK AI
@@ -978,11 +1077,16 @@ function renderCommunityPins() {
   }
 
   const inv = 1 / state.scale;
+  const curPlace = activeId ? placeById.get(activeId) : null;
+  const isRent = typeof userIntent !== "undefined" && userIntent === "rent";
   communityPinLayer.innerHTML = pinned.map(xq => {
     const pt = projectLonLat(xq.lng, xq.lat);
-    const txt = `${xq.name.slice(0, 7)} ${xq.price ? fmtWan(xq.price) : ""}`.trim();
+    const valStr = isRent && xq.price && typeof estMonthlyRentFromUnit === "function"
+      ? fmtRentShort(estMonthlyRentFromUnit(xq.price, xq.estRentYield || effectiveRentYield(curPlace)))
+      : (xq.price ? fmtWan(xq.price) : "");
+    const txt = `${xq.name.slice(0, 7)} ${valStr}`.trim();
     const w = Math.round(txt.length * 8.6 + 18);
-    return '<g class="xqPinNode' + (xq.isSelected ? " active" : "") + '" data-xqid="' + xq.id + '" data-xqc="' + xq.c + '" transform="translate(' + pt.x.toFixed(2) + " " + pt.y.toFixed(2) + ") scale(" + inv.toFixed(5) + ')">' +
+    return '<g class="xqPinNode' + (xq.isSelected ? " active" : "") + '" data-xqid="' + xq.id + '" data-xqc="' + xq.c + '" transform="translate(' + pt.x.toFixed(2) + " " + pt.y.toFixed(2) + ") scale(" + inv.toFixed(6) + ')">' +
       '<polygon points="-5,-2 5,-2 0,5" fill="' + (xq.isSelected ? "var(--brand)" : "#0f222d") + '"></polygon>' +
       '<rect class="xqPinBg" x="' + (-w / 2).toFixed(1) + '" y="-21" width="' + w + '" height="19" rx="5"></rect>' +
       '<text class="xqPinTxt" x="0" y="-7.8" text-anchor="middle">' + escapeHtml(txt) + "</text></g>";
@@ -1001,6 +1105,7 @@ async function inspectCommunityItem(r, dp, item, fly = true) {
   renderXqSubPanel(r, dp);
   renderBuyingAdviceUI(r);
   renderCommunityPins();
+  if (typeof updateNavBreadcrumb === "function") updateNavBreadcrumb();
   if (fly && det.lng && det.lat) {
     focusLonLat(det.lng, det.lat, Math.max(state.scale, 28), true);
   }
@@ -1288,10 +1393,12 @@ function renderXqSubPanel(r, dp) {
     return;
   }
 
+  const isRent = typeof userIntent !== "undefined" && userIntent === "rent";
+  const useYld = typeof effectiveRentYield === "function" ? effectiveRentYield(r) : 2.1;
   const specHtml = selectedCommunityDetail ? renderCommunitySpecCardHtml(selectedCommunityDetail, scope.refPrice) : "";
   mount.innerHTML =
     '<div class="xqBox">' +
-      '<div class="plateHead"><span>「' + escapeHtml(scope.label) + '」代表小区 (' + activePlateCommunities.length + ')</span><small>' + escapeHtml(activePlateSourceTag) + ' · 点击落图体检</small></div>' +
+      '<div class="plateHead"><span>「' + escapeHtml(scope.label) + '」代表小区 (' + activePlateCommunities.length + ')</span><small>' + escapeHtml(activePlateSourceTag) + ' · 点击看楼龄与落图</small></div>' +
       specHtml +
       '<div class="xqRows">' +
       activePlateCommunities.map((it, idx) => {
@@ -1300,13 +1407,16 @@ function renderXqSubPanel(r, dp) {
           ? `<span class="levelBadge district">低${Math.abs(diff)}%</span>`
           : diff >= 12
             ? `<span class="levelBadge supplement">高${diff}%</span>`
-            : `<span class="levelBadge">均价带</span>`;
+            : `<span class="levelBadge">适中</span>`;
         const isAct = selectedCommunityDetail && selectedCommunityDetail.id === it.id;
+        const dispPrice = isRent && typeof estMonthlyRentFromUnit === "function"
+          ? fmtRentShort(estMonthlyRentFromUnit(it.p, useYld))
+          : fmtWan(it.p);
         return '<div class="xqRow' + (isAct ? " active" : "") + '" data-xq-idx="' + idx + '">' +
           '<span class="rankNum">' + (idx + 1) + '</span>' +
           '<span class="xqName">' + escapeHtml(it.n) + '</span>' +
           alphaBadge +
-          '<span class="price">' + fmtWan(it.p) + '</span>' +
+          '<span class="price">' + dispPrice + '</span>' +
           '<span class="iconAct">' + (loadingCommunityId === it.id ? "加载..." : "体检") + '</span></div>';
       }).join("") +
       '</div></div>';
@@ -1447,7 +1557,8 @@ function generateQuantitativeAdvice(r) {
 function renderBuyingAdviceUI(r) {
   const mount = document.getElementById("adviceMount");
   if (!mount) return;
-  const diag = generateQuantitativeAdvice(r);
+  const isRent = typeof userIntent !== "undefined" && userIntent === "rent" && typeof generateRentalAdvice === "function";
+  const diag = isRent ? generateRentalAdvice(r) : generateQuantitativeAdvice(r);
   if (!diag) { mount.innerHTML = ""; return; }
 
   let savedAi = { url: "https://api.deepseek.com/chat/completions", model: "deepseek-chat", key: "", brief: "" };
@@ -1457,15 +1568,23 @@ function renderBuyingAdviceUI(r) {
   } catch (_) {}
 
   const altHtml = diag.alts.length
-    ? '<li><b>25km通勤平替：</b>若预算受限，周边可重点对比 ' +
-      diag.alts.map(a => `<button type="button" class="linkBtn advAltBtn" data-id="${a.cand.id}">${escapeHtml(a.cand.city.replace(/市$/, "") + "·" + a.cand.name)}（${a.dKm.toFixed(0)}km · ${fmtWan(a.cand.price)} · 省${a.savePct}%）</button>`).join("、") +
+    ? '<li><b>25km通勤省钱平替：</b>若想进一步降低成本，周边可重点对比 ' +
+      diag.alts.map(a => {
+        const costTag = isRent && a.altRent ? `约¥${fmt(a.altRent)}/月` : fmtWan(a.cand.price);
+        return `<button type="button" class="linkBtn advAltBtn" data-id="${a.cand.id}">${escapeHtml(a.cand.city.replace(/市$/, "") + "·" + a.cand.name)}（${a.dKm.toFixed(0)}km · ${costTag} · 省${a.savePct}%）</button>`;
+      }).join("、") +
       "。</li>"
     : "";
+
+  const boxTitle = isRent ? `局部租住与租买建议 · ${diag.targetName}` : `局部置业诊断 · ${diag.targetName}`;
+  const aiPlaceholder = isRent
+    ? "输入您的租房需求：如 月租预算2500元、南山科技园上班、独居注重安静安全"
+    : "输入您的买房需求：如 总预算300万、海淀通勤、首套三房兼顾学区";
 
   mount.innerHTML =
     '<div class="adviceBox">' +
       '<div class="adviceHead">' +
-        '<span class="adviceTitle">局部置业诊断 · ' + escapeHtml(diag.targetName) + '</span>' +
+        '<span class="adviceTitle">' + escapeHtml(boxTitle) + '</span>' +
         '<span class="' + diag.verdictCls + '">' + escapeHtml(diag.verdict) + '</span>' +
       '</div>' +
       '<ul class="adviceList">' +
@@ -1473,9 +1592,9 @@ function renderBuyingAdviceUI(r) {
         altHtml +
       '</ul>' +
       '<details class="calcBox" style="padding:8px 10px">' +
-        '<summary><span>AI 定制看房顾问（结合个人需求与实测数据深度推演）</span><span>展开 ▾</span></summary>' +
+        '<summary><span>AI 定制' + (isRent ? "租房" : "看房") + '顾问（结合个人需求与实测数据深度推演）</span><span>展开 ▾</span></summary>' +
         '<div class="aiForm">' +
-          '<input id="aiUserBrief" class="aiInput" type="text" placeholder="输入您的需求：如 预算500万、南山科技园通勤、首套三房重学区" value="' + escapeHtml(savedAi.brief) + '">' +
+          '<input id="aiUserBrief" class="aiInput" type="text" placeholder="' + aiPlaceholder + '" value="' + escapeHtml(savedAi.brief) + '">' +
           '<div class="aiGrid2">' +
             '<input id="aiApiUrl" class="aiInput" type="url" placeholder="兼容OpenAI接口地址" value="' + escapeHtml(savedAi.url) + '">' +
             '<input id="aiApiModel" class="aiInput" type="text" placeholder="模型名 (如 deepseek-chat)" value="' + escapeHtml(savedAi.model) + '">' +
@@ -1499,7 +1618,7 @@ function renderBuyingAdviceUI(r) {
       const url = document.getElementById("aiApiUrl").value.trim();
       const model = document.getElementById("aiApiModel").value.trim();
       const key = document.getElementById("aiApiKey").value.trim();
-      const brief = document.getElementById("aiUserBrief").value.trim() || "自住兼顾保值，请给出客观选筹、谈判与避坑建议";
+      const brief = document.getElementById("aiUserBrief").value.trim() || (isRent ? "通勤方便、性价比高、民水民电，请给出租房选点与签约避坑建议" : "自住兼顾保值，请给出客观选筹、谈判与避坑建议");
       const outEl = document.getElementById("aiAdvisorOut");
       if (!key || !url) {
         showToast("请先填写兼容 OpenAI 格式的 API Key 与接口地址");
@@ -1507,11 +1626,12 @@ function renderBuyingAdviceUI(r) {
       }
       try { localStorage.setItem("atlas-ai-cfg", JSON.stringify({ url, model, key, brief })); } catch (_) {}
       outEl.style.display = "block";
-      outEl.textContent = "正在结合当前区域、板块与小区的实测多维数据推演置业方案...";
+      outEl.textContent = "正在结合当前区域、板块与小区的实测多维数据为您推演方案...";
       runBtn.disabled = true;
 
       const contextPacket = {
-        region: { province: r.province, city: r.city, name: r.name, resalePrice: r.price, newPrice: r.newPrice, yoy: r.yoy, rentYield: r.rentYield, priceToIncome: r.priceToIncome, drawdownFromPeakPct: r.drawdownPct },
+        intent: isRent ? "租房居住" : "买房置业",
+        region: { province: r.province, city: r.city, name: r.name, resalePrice: r.price, newPrice: r.newPrice, yoy: r.yoy, rentYield: r.rentYield, estMonthlyRent2BR: typeof estPlaceMonthlyRent === "function" ? estPlaceMonthlyRent(r, "two") : null, priceToIncome: r.priceToIncome, drawdownFromPeakPct: r.drawdownPct },
         selectedStreetPlate: selectedPlateInfo?.distId === r.id ? { name: selectedPlateInfo.n, price: selectedPlateInfo.p, mom: selectedPlateInfo.m } : null,
         topCommunitiesInPlate: activePlateCommunities.slice(0, 8).map(c => ({ name: c.n, price: c.p, mom: c.m })),
         selectedCommunity: selectedCommunityDetail ? { name: selectedCommunityDetail.name, price: selectedCommunityDetail.price, year: selectedCommunityDetail.year, plotRatio: selectedCommunityDetail.plotRatio, greenRate: selectedCommunityDetail.greenRate, archType: selectedCommunityDetail.archType, propertyFee: selectedCommunityDetail.propertyFee, estRentYield: selectedCommunityDetail.estRentYield } : null,
@@ -1519,6 +1639,9 @@ function renderBuyingAdviceUI(r) {
       };
 
       try {
+        const sysPrompt = isRent
+          ? "你是一位贴心、客观的中国城市租房与居住规划顾问。必须严格依据提供的实测JSON数据作答，严禁编造虚假租金。请分4点通俗易懂地输出：1.房租预算与通勤匹配度；2.候选街道/小区租住优缺点；3.租房vs买房现阶段建议；4.看房签约防坑要点与周边省钱平替。"
+          : "你是一位严谨、客观的中国房产空间数据分析师。必须严格依据提供的实测JSON数据作答，严禁编造虚假房价。请分4点通俗易懂地输出：1.预算与板块匹配度；2.候选小区优劣势与挑房要点；3.议价与时机策略；4.通勤平替方案。";
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
@@ -1526,8 +1649,8 @@ function renderBuyingAdviceUI(r) {
             model,
             temperature: 0.35,
             messages: [
-              { role: "system", content: "你是一位严谨、客观的中国房产空间数据分析师。必须严格依据提供的实测JSON数据作答，严禁编造虚假房价。请分4点简明输出：1.预算与板块匹配度；2.候选小区优劣势与挑房要点；3.议价与时机策略；4.通勤平替方案。" },
-              { role: "user", content: `购房者需求：${brief}\n当前局部实测数据JSON：${JSON.stringify(contextPacket)}` },
+              { role: "system", content: sysPrompt },
+              { role: "user", content: `用户需求：${brief}\n当前局部实测数据JSON：${JSON.stringify(contextPacket)}` },
             ],
           }),
         });
@@ -1540,6 +1663,1318 @@ function renderBuyingAdviceUI(r) {
         runBtn.disabled = false;
       }
     };
+  }
+}
+
+// ============================================================================
+// Dual-Persona (Buy / Rent) Engine + 3-Step Smart Matchmaker + Breadcrumb UX
+// ============================================================================
+
+const RENT_LAYOUTS = {
+  room: {
+    key: "room",
+    label: "合租单间",
+    short: "单间",
+    desc: "约18㎡主次卧",
+    eqSqm: 23,
+    breaks: [0, 450, 700, 1000, 1400, 2000, 2800, 4000, 25000],
+    labels: ["<450", "450-700", "700-1k", "1k-1.4k", "1.4k-2k", "2k-2.8k", "2.8k-4k", "4k+"],
+  },
+  one: {
+    key: "one",
+    label: "独居一居",
+    short: "一居",
+    desc: "约38㎡整租一室",
+    eqSqm: 40,
+    breaks: [0, 750, 1100, 1600, 2300, 3300, 4800, 6800, 40000],
+    labels: ["<750", "750-1.1k", "1.1k-1.6k", "1.6k-2.3k", "2.3k-3.3k", "3.3k-4.8k", "4.8k-6.8k", "6.8k+"],
+  },
+  two: {
+    key: "two",
+    label: "整租两居",
+    short: "两居",
+    desc: "约65㎡主流两室",
+    eqSqm: 65,
+    breaks: [0, 1100, 1600, 2300, 3200, 4500, 6800, 10000, 60000],
+    labels: ["<1.1k", "1.1k-1.6k", "1.6k-2.3k", "2.3k-3.2k", "3.2k-4.5k", "4.5k-6.8k", "6.8k-1万", "1万+"],
+  },
+  three: {
+    key: "three",
+    label: "家庭三居",
+    short: "三居",
+    desc: "约95㎡舒适三室",
+    eqSqm: 95,
+    breaks: [0, 1500, 2200, 3200, 4500, 6500, 9500, 14000, 90000],
+    labels: ["<1.5k", "1.5k-2.2k", "2.2k-3.2k", "3.2k-4.5k", "4.5k-6.5k", "6.5k-9.5k", "9.5k-1.4万", "1.4万+"],
+  },
+};
+
+const METRIC_BEGINNER_TIPS = {
+  resale: "颜色越暖代表二手房价越高；滚动滚轮放大地图会自动展开区县、街道与代表小区。",
+  estRent: "按所选租住户型估算整月房租；深绿代表月租亲民，橙红代表核心高租金片区。",
+  newPrice: "当地在售新建商品住宅参考均价；可点右侧「一二手价差」对比买新房还是二手房划算。",
+  yoy: "对比去年同期涨跌：绿色代表降价（买方议价空间大），红色代表上涨。",
+  rentYield: "年租金 ÷ 房价：深绿（>2.5%）代表收租现金流扎实、房价水分较少。",
+  priceToIncome: "当地普通家庭不吃不喝买一套 90㎡ 所需年数：绿色（<8年）代表安家压力最小。",
+  drawdown: "距近十年最高点的跌幅：深绿（跌超30%）代表前期高点泡沫已显著消化。",
+  spread: "蓝色代表新房比同区二手房更便宜（价格倒挂），橙红代表新盘改善溢价较高。",
+};
+
+const CROSS_PROVINCE_METRO_NEIGHBORS = {
+  "北京": ["河北", "天津"],
+  "天津": ["河北", "北京"],
+  "上海": ["江苏", "浙江"],
+  "广东": ["香港", "澳门"],
+  "江苏": ["上海", "安徽", "浙江"],
+  "浙江": ["上海", "江苏"],
+  "陕西": ["山西"],
+  "重庆": ["四川"],
+};
+
+let userIntent = "buy"; // "buy" | "rent"
+let rentLayout = "two";
+let matchmakerOpen = false;
+let mmWorkPlaceId = "";
+let mmWorkQuery = "";
+let mmCommuteKm = 30;
+let mmBuyBudgetWan = 220;
+let mmBuyArea = 95;
+let mmBuyPref = "commute"; // "commute" | "afford" | "hold" | "value"
+let mmRentBudgetYuan = 2600;
+let mmRentPref = "commute"; // "commute" | "save" | "comfort"
+let mmResults = null;
+
+try {
+  const savedIntent = localStorage.getItem("atlas-user-intent");
+  if (savedIntent === "rent" || savedIntent === "buy") userIntent = savedIntent;
+  const savedLayout = localStorage.getItem("atlas-rent-layout");
+  if (savedLayout && RENT_LAYOUTS[savedLayout]) rentLayout = savedLayout;
+} catch (_) {}
+
+const cityYieldLookup = new Map();
+function ensureCityYieldLookup() {
+  if (cityYieldLookup.size > 0 || typeof regions === "undefined") return;
+  regions.forEach(r => {
+    if (Number.isFinite(r.rentYield)) {
+      cityYieldLookup.set(r.city, r.rentYield);
+      cityYieldLookup.set((r.city || "").replace(/市$/, ""), r.rentYield);
+    }
+  });
+}
+
+function effectiveRentYield(r) {
+  if (!r) return null;
+  if (Number.isFinite(r.rentYield) && r.rentYield > 0) return r.rentYield;
+  ensureCityYieldLookup();
+  const cy = cityYieldLookup.get(r.city) || cityYieldLookup.get((r.city || "").replace(/市$/, ""));
+  if (Number.isFinite(cy) && cy > 0) return Number((cy * 1.04).toFixed(2));
+  return 2.15;
+}
+
+function estMonthlyRentFromUnit(unitPrice, yld, layoutKey = rentLayout) {
+  if (!unitPrice || unitPrice <= 0) return null;
+  const useYld = Number.isFinite(yld) && yld > 0 ? yld : 2.15;
+  const cfg = RENT_LAYOUTS[layoutKey] || RENT_LAYOUTS.two;
+  const rentPerSqm = (unitPrice * (useYld / 100)) / 12;
+  return Math.max(180, Math.round((rentPerSqm * cfg.eqSqm) / 10) * 10);
+}
+
+function estPlaceMonthlyRent(r, layoutKey = rentLayout) {
+  if (!r || !r.price) return null;
+  return estMonthlyRentFromUnit(r.price, effectiveRentYield(r), layoutKey);
+}
+
+function fmtRentShort(yuan) {
+  if (!yuan) return "--";
+  if (yuan >= 10000) return "¥" + (yuan / 10000).toFixed(2).replace(/\.?0+$/, "") + "万/月";
+  return "¥" + fmt(yuan) + "/月";
+}
+
+function syncEstRentMetricConfig() {
+  if (typeof METRIC_CONFIGS === "undefined" || !METRIC_CONFIGS.estRent) return;
+  const cfg = RENT_LAYOUTS[rentLayout] || RENT_LAYOUTS.two;
+  METRIC_CONFIGS.estRent.title = `预估月租金 · ${cfg.label}（${cfg.desc}，元/月）`;
+  METRIC_CONFIGS.estRent.short = `月租(${cfg.short})`;
+  METRIC_CONFIGS.estRent.breaks = cfg.breaks;
+  METRIC_CONFIGS.estRent.labels = cfg.labels;
+}
+
+function setIntentMode(nextMode, silent = false) {
+  if (nextMode !== "buy" && nextMode !== "rent") return;
+  userIntent = nextMode;
+  try { localStorage.setItem("atlas-user-intent", userIntent); } catch (_) {}
+
+  document.querySelectorAll(".intentBtn[data-intent]").forEach(btn => {
+    const on = btn.dataset.intent === userIntent;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
+  });
+
+  syncEstRentMetricConfig();
+
+  if (userIntent === "rent" && metricMode === "resale") {
+    metricMode = "estRent";
+  } else if (userIntent === "buy" && metricMode === "estRent") {
+    metricMode = "resale";
+  }
+
+  document.querySelectorAll(".metricTab").forEach(t => {
+    const on = t.dataset.metric === metricMode;
+    t.classList.toggle("active", on);
+    t.setAttribute("aria-selected", on ? "true" : "false");
+  });
+
+  activeBin = -1;
+  refreshLegendUI();
+  recolorAndFilterAll();
+  if (activeId && placeById.get(activeId)) {
+    renderDossier(placeById.get(activeId));
+  } else {
+    renderEmptyDossier();
+  }
+  if (matchmakerOpen) renderMatchmakerPanel();
+  if (!silent) {
+    showToast(userIntent === "rent" ? "已切换至「租房安居」视角 · 地图与列表同步显示预估月租" : "已切换至「买房置业」视角 · 显示房价、首付月供与置业诊断");
+  }
+}
+
+function setRentLayout(nextLayout) {
+  if (!RENT_LAYOUTS[nextLayout]) return;
+  rentLayout = nextLayout;
+  try { localStorage.setItem("atlas-rent-layout", rentLayout); } catch (_) {}
+  syncEstRentMetricConfig();
+  if (metricMode === "estRent") {
+    activeBin = -1;
+    refreshLegendUI();
+    recolorAndFilterAll();
+  } else {
+    scheduleTransform({ forceLabels: true });
+  }
+  if (activeId && placeById.get(activeId)) renderDossier(placeById.get(activeId));
+  if (matchmakerOpen && userIntent === "rent") renderMatchmakerPanel();
+}
+
+// ============================================================================
+// Interactive Spatial Breadcrumb (全国 › 省 › 市 › 区 › 街道)
+// ============================================================================
+
+function updateNavBreadcrumb() {
+  const el = document.getElementById("navBreadcrumb");
+  if (!el) return;
+  const r = activeId ? placeById.get(activeId) : null;
+  const sp = selectedPlateInfo && r && selectedPlateInfo.distId === r.id ? selectedPlateInfo : null;
+
+  const crumbs = [{ label: "全国总览", action: "country" }];
+  if (r) {
+    if (r.province && r.province !== r.city) {
+      crumbs.push({ label: r.province, action: "prov", prov: r.province });
+    }
+    if (r.city) {
+      crumbs.push({ label: r.city, action: "city", city: r.city, prov: r.province });
+    }
+    if (r.dataLevel !== "city" && r.name !== r.city) {
+      crumbs.push({ label: r.name, action: "dist", id: r.id });
+    }
+    if (sp) {
+      crumbs.push({ label: sp.n, action: "plate" });
+    }
+    if (selectedCommunityDetail?.name) {
+      crumbs.push({ label: selectedCommunityDetail.name.slice(0, 8), action: "xq" });
+    }
+  } else if (state.scale >= 9.0) {
+    crumbs.push({ label: "街道板块级视野", action: "none" });
+  } else if (state.scale >= 2.8) {
+    crumbs.push({ label: "区县级视野", action: "none" });
+  }
+
+  el.innerHTML = crumbs.map((c, idx) => {
+    const isLast = idx === crumbs.length - 1;
+    if (isLast || c.action === "none") {
+      return '<span class="crumbCur">' + escapeHtml(c.label) + "</span>";
+    }
+    return '<button type="button" class="crumbBtn" data-cidx="' + idx + '">' + escapeHtml(c.label) + '</button><span class="crumbSep">›</span>';
+  }).join("");
+
+  el.querySelectorAll(".crumbBtn").forEach(btn => {
+    btn.onclick = () => {
+      const item = crumbs[Number(btn.dataset.cidx)];
+      if (!item) return;
+      if (item.action === "country") {
+        selectedPlateInfo = null;
+        selectedCommunityDetail = null;
+        resetButton.click();
+      } else if (item.action === "prov") {
+        selectedPlateInfo = null;
+        selectedCommunityDetail = null;
+        const provCity = regions.find(x => x.province === item.prov);
+        if (provCity) {
+          selectRegion(provCity.id, false);
+          animateFocusContentPoint(provCity.cx, provCity.cy, 4.2);
+        }
+      } else if (item.action === "city") {
+        selectedPlateInfo = null;
+        selectedCommunityDetail = null;
+        const cityReg = regions.find(x => x.city === item.city || x.name === item.city);
+        if (cityReg) {
+          selectRegion(cityReg.id, false);
+          animateFocusContentPoint(cityReg.cx, cityReg.cy, 8.2);
+        }
+      } else if (item.action === "dist" && item.id) {
+        selectedPlateInfo = null;
+        selectedCommunityDetail = null;
+        selectRegion(item.id, false);
+        const distReg = placeById.get(item.id);
+        if (distReg) animateFocusContentPoint(distReg.cx, distReg.cy, 15.5);
+      } else if (item.action === "plate" && r) {
+        selectedCommunityDetail = null;
+        renderDossier(r);
+      }
+    };
+  });
+}
+
+// ============================================================================
+// 5-Dimension Renter & Rent-vs-Buy Diagnostic Engine
+// ============================================================================
+
+function generateRentalAdvice(r) {
+  if (!r || !r.price) return null;
+  const sp = selectedPlateInfo && selectedPlateInfo.distId === r.id ? selectedPlateInfo : null;
+  const xq = selectedCommunityDetail;
+  const layoutCfg = RENT_LAYOUTS[rentLayout] || RENT_LAYOUTS.two;
+  const yld = xq?.estRentYield || effectiveRentYield(r);
+  const refUnitPrice = xq?.price || sp?.p || r.price;
+
+  let monthlyRent = estMonthlyRentFromUnit(refUnitPrice, yld, rentLayout);
+  if (xq?.rentSamples?.length && rentLayout === "two") {
+    monthlyRent = xq.rentSamples[0].monthly;
+  }
+  if (!monthlyRent) return null;
+
+  const targetName = xq?.name
+    ? `${sp?.n || r.name}·${xq.name}`
+    : (sp?.n ? `${r.name}·${sp.n}板块` : (r.city === r.name ? r.name : `${r.city}${r.name}`));
+
+  const buyArea = layoutCfg.eqSqm;
+  const loanYuan = refUnitPrice * buyArea * (1 - calcDown);
+  const monthlyMortgage = Math.round(calcMonthlyPayment(loanYuan, calcRate, 30));
+  const mortToRent = monthlyMortgage / Math.max(1, monthlyRent);
+  const safeSalary = Math.round((monthlyRent / 0.3) / 100) * 100;
+  const firstOutlay = monthlyRent * 4; // 押一付三
+
+  let verdict = "租金温和 · 宜居片区";
+  let verdictCls = "levelBadge district";
+  if (mortToRent >= 2.6) {
+    verdict = `租房极划算 · 月省 ¥${fmt(monthlyMortgage - monthlyRent)}`;
+    verdictCls = "levelBadge district";
+  } else if (mortToRent <= 1.25) {
+    verdict = "月供接近房租 · 长住可考虑买房";
+    verdictCls = "levelBadge supplement";
+  } else if (monthlyRent <= 1500 && rentLayout === "two") {
+    verdict = "低成本安居友好区";
+    verdictCls = "levelBadge district";
+  }
+
+  const bullets = [];
+
+  // 1. Rent burden & safe salary rule
+  bullets.push(
+    `<b>房租与月薪安全线：</b>${layoutCfg.label}（${layoutCfg.desc}）预估月租约 <b>¥${fmt(monthlyRent)}/月</b>，押一付三首期需准备约 ¥${fmt(firstOutlay)}；按国际通用的「房租不超过税后收入 30%」舒适线，适合月收入 <b>≥ ¥${fmt(safeSalary)}</b> 的人群。`
+  );
+
+  // 2. Rent vs Buy 5-year cashflow decision
+  if (mortToRent >= 2.2) {
+    const saveYearWan = (((monthlyMortgage - monthlyRent) * 12) / 10000).toFixed(1);
+    bullets.push(
+      `<b>该租还是该买：</b>买同面积房源 30 年月供约 ¥${fmt(monthlyMortgage)}（是月租的 ${mortToRent.toFixed(1)} 倍）。当前在此租房每年可比买房少支出约 <b>${saveYearWan} 万</b> 现金流，无资产跌价风险，现阶段租住性价比远高于勉强上车。`
+    );
+  } else if (mortToRent <= 1.3) {
+    bullets.push(
+      `<b>该租还是该买：</b>同面积 30 年月供约 ¥${fmt(monthlyMortgage)}，仅为月租的 ${mortToRent.toFixed(2)} 倍（每月差额仅 ¥${fmt(Math.abs(monthlyMortgage - monthlyRent))}）。若工作稳定且打算在此居住 5 年以上，攒够首付转租为买更划算。`
+    );
+  } else {
+    bullets.push(
+      `<b>该租还是该买：</b>同面积月供约 ¥${fmt(monthlyMortgage)}（月租的 ${mortToRent.toFixed(1)} 倍）。处于工作变动期或首付尚紧时建议安心租住，待定居规划明确后再择机购入次新盘。`
+    );
+  }
+
+  // 3. On-site rental inspection checklist tailored to community specs
+  if (xq && (xq.year || xq.plotRatio || xq.propertyFee)) {
+    const checks = [];
+    const age = xq.year ? 2026 - xq.year : null;
+    if (age !== null && age >= 20) checks.push(`小区楼龄约 ${age} 年，签约前必查空调是否为一级能效（老旧三级空调夏季电费翻倍）、下水管道反味及门窗隔音`);
+    else if (age !== null) checks.push(`${xq.year} 年社区，公区较新，看房重点确认宽带光纤入户与快递外卖上楼便利度`);
+    if (xq.plotRatio && xq.plotRatio > 4.0) checks.push(`容积率 ${xq.plotRatio} 偏高，务必早高峰实测等电梯时间，并确认水电是否为「民水民电」（避开商水商电高溢价公寓）`);
+    else checks.push(`务必核实「民水民电」账单单价，并查验房东房产证与身份证原件（谨防高收低租二房东跑路）`);
+    if (xq.propertyFee) checks.push(`物业费参考 ${xq.propertyFee}，签约时明确约定物业费与取暖费由房东还是租客承担`);
+    bullets.push(`<b>实地看租避坑：</b>${checks.join("；")}。`);
+  } else {
+    bullets.push(
+      `<b>看租签约必查：</b>① 确认民水民电（电费约0.5-0.6元/度，避开1.2-1.5元/度的商改住）；② 手机实测卧室与卫生间信号及夜间临街噪音；③ 查验房东不动产权证原件，押金条款写明自然老化免责。`
+    );
+  }
+
+  // 4. 25km cheaper commute rental alternatives
+  const alts = findCommuteAlternatives(r, 26).map(a => ({
+    ...a,
+    altRent: estPlaceMonthlyRent(a.cand, rentLayout),
+  })).filter(a => a.altRent && a.altRent < monthlyRent * 0.82);
+
+  return { targetName, monthlyRent, verdict, verdictCls, bullets, alts };
+}
+
+// ============================================================================
+// 3-Step Beginner Smart Matchmaker Wizard (帮我找房)
+// ============================================================================
+
+const POPULAR_WORK_SPOTS = [
+  { label: "深圳·南山", city: "深圳", area: "南山区" },
+  { label: "北京·海淀", city: "北京", area: "海淀区" },
+  { label: "上海·浦东", city: "上海", area: "浦东新区" },
+  { label: "广州·天河", city: "广州", area: "天河区" },
+  { label: "杭州·滨江", city: "杭州", area: "滨江区" },
+  { label: "成都·高新", city: "成都", area: "成都" },
+  { label: "石家庄·裕华", city: "石家庄", area: "裕华区" },
+  { label: "全国不限(找宜居城)", city: "", area: "" },
+];
+
+async function resolveWorkAnchorAndLoadNeighbors(queryText) {
+  const q = String(queryText || "").trim();
+  if (!q || q.includes("全国不限")) return null;
+
+  // First match against already-loaded places or base city regions
+  let baseCity = regions.find(c => q.includes(c.city.replace(/市$/, "")) || q.includes(c.name.replace(/市$/, "")));
+  if (baseCity) {
+    const provsToLoad = [baseCity.province, ...(CROSS_PROVINCE_METRO_NEIGHBORS[baseCity.province] || [])];
+    for (const pv of provsToLoad) {
+      const src = detailSources.find(s => s.prov === pv);
+      if (src && !loadedDetailSources.has(src.id)) {
+        await loadDetailSource(src);
+      }
+    }
+  }
+
+  // Try exact district match first, then city match
+  const parts = q.split(/[·\s,，-]+/).filter(Boolean);
+  let best = null;
+  for (const p of places) {
+    if (isInherited(p)) continue;
+    const full = `${p.city}${p.name}`;
+    if (parts.length >= 2 && full.includes(parts[0]) && p.name.includes(parts[1]) && p.dataLevel !== "city") {
+      best = p;
+      break;
+    }
+  }
+  if (!best) {
+    best = places.find(p => p.dataLevel !== "city" && !isInherited(p) && p.name.replace(/[区县市]$/, "") === q.replace(/[区县市]$/, ""))
+      || places.find(p => fullNameMatch(p, q))
+      || baseCity;
+  }
+  if (!best) {
+    const poiHits = await searchCommutePoiCandidates(q);
+    if (poiHits[0]) {
+      const pt = projectLonLat(poiHits[0].lon, poiHits[0].lat);
+      const nearCity = nearestRegionAtContentPt(pt.x, pt.y);
+      if (nearCity?.province) {
+        const provsToLoad = [nearCity.province, ...(CROSS_PROVINCE_METRO_NEIGHBORS[nearCity.province] || [])];
+        for (const pv of provsToLoad) {
+          const src = detailSources.find(s => s.prov === pv);
+          if (src && !loadedDetailSources.has(src.id)) await loadDetailSource(src);
+        }
+      }
+      const nearDist = nearestRegionAtContentPt(pt.x, pt.y);
+      return {
+        id: nearDist?.id || "",
+        cx: pt.x,
+        cy: pt.y,
+        lon: poiHits[0].lon,
+        lat: poiHits[0].lat,
+        city: nearDist?.city || "",
+        name: poiHits[0].name,
+        province: nearDist?.province || "",
+        price: nearDist?.price || null,
+        isExactPoi: true,
+      };
+    }
+  }
+  return best || null;
+}
+
+function fullNameMatch(p, q) {
+  const cleanQ = q.replace(/[省市区县]/g, "");
+  if (!cleanQ) return false;
+  const full = `${p.province || ""}${p.city || ""}${p.name || ""}`.replace(/[省市区县]/g, "");
+  return full.includes(cleanQ);
+}
+
+async function runPersonalMatchmaker() {
+  const btn = document.getElementById("mmRunBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "正在分析全国匹配片区..."; }
+
+  try {
+    const anchor = await resolveWorkAnchorAndLoadNeighbors(mmWorkQuery);
+    let anchorLon = null, anchorLat = null;
+    if (anchor) {
+      mmWorkPlaceId = anchor.id;
+      [anchorLon, anchorLat] = anchor.isExactPoi ? [anchor.lon, anchor.lat] : svgToLonLat(anchor.cx, anchor.cy);
+      commuteActive = true;
+      if (toggleRadiusButton) toggleRadiusButton.classList.add("active");
+      if (anchor.isExactPoi) {
+        setCommuteAnchorFreeContentPt(anchor.cx, anchor.cy, anchor.name, null, true);
+      } else {
+        setCommuteAnchorFromRegion(anchor);
+      }
+    } else {
+      mmWorkPlaceId = "";
+      commuteActive = false;
+      if (toggleRadiusButton) toggleRadiusButton.classList.remove("active");
+      renderCommuteOverlay(null);
+    }
+
+    const candidates = [];
+    const preferDistrict = Boolean(anchor && coveredProvinces.size > 0);
+
+    for (let i = 0; i < places.length; i += 1) {
+      const p = places[i];
+      if (!p.price || isInherited(p)) continue;
+      if (preferDistrict && p.dataLevel === "city" && coveredProvinces.has(p.province)) continue;
+      if (!preferDistrict && p.dataLevel !== "city") continue;
+
+      let dKm = null;
+      if (anchorLon !== null) {
+        const [pLon, pLat] = svgToLonLat(p.cx, p.cy);
+        dKm = haversineKm(anchorLon, anchorLat, pLon, pLat);
+        if (dKm > mmCommuteKm) continue;
+      }
+
+      if (userIntent === "buy") {
+        const totalWan = (p.price * mmBuyArea) / 10000;
+        if (totalWan > mmBuyBudgetWan * 1.12) continue; // Allow up to +12% stretch with note
+        const budgetRatio = totalWan / Math.max(1, mmBuyBudgetWan);
+        const downWan = totalWan * calcDown;
+        const mPay = Math.round(calcMonthlyPayment(p.price * mmBuyArea * (1 - calcDown), calcRate, 30));
+        const yld = effectiveRentYield(p) || 2.0;
+        const dd = Number.isFinite(p.drawdownPct) ? p.drawdownPct : -15;
+        const pti = Number.isFinite(p.priceToIncome) ? p.priceToIncome : 11;
+
+        let score = 70;
+        // Budget comfort (sweet spot: 55% - 92% of budget so quality isn't too low nor overstretched)
+        const sBudget = budgetRatio <= 1 ? (100 - Math.abs(0.78 - budgetRatio) * 45) : (68 - (budgetRatio - 1) * 180);
+        const sCommute = dKm !== null ? Math.max(20, 100 - (dKm / mmCommuteKm) * 72) : Math.max(30, 100 - pti * 4.2);
+        const sHold = Math.min(98, yld * 22 + Math.max(0, 35 + dd));
+        const sValue = Math.min(98, Math.abs(Math.min(0, dd)) * 1.9 + yld * 14);
+
+        if (mmBuyPref === "commute") score = sCommute * 0.52 + sBudget * 0.30 + sHold * 0.18;
+        else if (mmBuyPref === "afford") score = (100 - budgetRatio * 55) * 0.55 + sCommute * 0.25 + sHold * 0.20;
+        else if (mmBuyPref === "hold") score = sHold * 0.50 + sCommute * 0.30 + sBudget * 0.20;
+        else score = sValue * 0.55 + sBudget * 0.25 + sCommute * 0.20;
+
+        let reason = "";
+        if (dKm !== null && dKm <= 8) reason = "就在上班核心圈内，通勤极短";
+        else if (budgetRatio <= 0.72) reason = `比预算省 ${Math.round((1 - budgetRatio) * 100)}%，月供压力轻`;
+        else if (dd <= -30) reason = `距高点已回调 ${Math.abs(dd).toFixed(0)}%，安全垫较厚`;
+        else if (yld >= 2.5) reason = `租售比达 ${yld.toFixed(2)}%，宜居保值`;
+        else reason = budgetRatio > 1 ? "略超预算但地段核心，可淘次新小户型" : "预算与通勤距离均衡匹配";
+
+        candidates.push({
+          place: p,
+          score: Math.max(55, Math.min(98, Math.round(score))),
+          dKm,
+          costMain: `${mmBuyArea}㎡约 ${totalWan.toFixed(0)}万`,
+          costSub: `首付${downWan.toFixed(0)}万 · 月供¥${fmt(mPay)}`,
+          reason,
+        });
+      } else {
+        const mRent = estPlaceMonthlyRent(p, rentLayout);
+        if (!mRent || mRent > mmRentBudgetYuan * 1.15) continue;
+        const rentRatio = mRent / Math.max(1, mmRentBudgetYuan);
+        const sCommute = dKm !== null ? Math.max(38, 100 - (dKm / mmCommuteKm) * 52) : 86;
+        const sSave = rentRatio <= 1 ? (98 - rentRatio * 22) : Math.max(42, 76 - (rentRatio - 1) * 150);
+        const sComfort = Math.min(96, 72 + (effectiveRentYield(p) || 2) * 9);
+
+        let score = 72;
+        if (mmRentPref === "commute") score = sCommute * 0.58 + sSave * 0.27 + sComfort * 0.15;
+        else if (mmRentPref === "save") score = sSave * 0.58 + sCommute * 0.27 + sComfort * 0.15;
+        else score = sComfort * 0.45 + sCommute * 0.35 + sSave * 0.20;
+
+        const anchorRent = anchor ? estPlaceMonthlyRent(anchor, rentLayout) : null;
+        let reason = "";
+        if (dKm !== null && dKm <= 7) reason = "近距离通勤，每天少挤地铁";
+        else if (anchorRent && mRent <= anchorRent * 0.65) reason = `比上班核心区每月省 ¥${fmt(anchorRent - mRent)}`;
+        else if (rentRatio <= 0.75) reason = `低于月租预算 ${Math.round((1 - rentRatio) * 100)}%，手头更宽裕`;
+        else reason = "租金符合预算，生活配套成熟";
+
+        candidates.push({
+          place: p,
+          score: Math.max(58, Math.min(98, Math.round(score))),
+          dKm,
+          costMain: `约 ¥${fmt(mRent)}/月`,
+          costSub: `${RENT_LAYOUTS[rentLayout].label} · 押一付三 ¥${fmt(mRent * 4)}`,
+          reason,
+        });
+      }
+    }
+
+    candidates.sort((a, b) => b.score - a.score || (a.dKm ?? 999) - (b.dKm ?? 999));
+    mmResults = {
+      anchorName: anchor ? (anchor.city === anchor.name ? anchor.name : `${anchor.city.replace(/市$/, "")}·${anchor.name}`) : "全国范围",
+      items: candidates.slice(0, 6),
+    };
+
+    // Highlight on map using budget filter if buying, and focus viewport smoothly
+    if (anchor) {
+      const targetScale = mmCommuteKm <= 16 ? 13.5 : mmCommuteKm <= 32 ? 8.8 : 6.2;
+      animateFocusContentPoint(anchor.cx, anchor.cy, targetScale);
+    } else if (mmResults.items[0]) {
+      const topP = mmResults.items[0].place;
+      animateFocusContentPoint(topP.cx, topP.cy, 4.5);
+    }
+
+    renderMatchmakerPanel();
+    if (mmResults.items.length) {
+      showToast(`已为您筛选出 ${mmResults.items.length} 个高契合片区，点击即可查看街道与小区`);
+    } else {
+      showToast("当前预算或通勤半径内暂无匹配片区，建议适当放宽预算或通勤距离");
+    }
+  } finally {
+    const btnAfter = document.getElementById("mmRunBtn");
+    if (btnAfter) { btnAfter.disabled = false; btnAfter.textContent = "为我匹配合适片区"; }
+  }
+}
+
+function renderMatchmakerPanel() {
+  const mount = document.getElementById("matchmakerMount");
+  if (!mount) return;
+  if (!matchmakerOpen) {
+    mount.innerHTML = "";
+    return;
+  }
+
+  const downPreview = (mmBuyBudgetWan * calcDown).toFixed(0);
+  const payPreview = Math.round(calcMonthlyPayment(mmBuyBudgetWan * 10000 * (1 - calcDown), calcRate, 30));
+  const salaryPreview = Math.round((mmRentBudgetYuan / 0.3) / 100) * 100;
+
+  const spotsHtml = POPULAR_WORK_SPOTS.map(s => {
+    const val = s.city ? `${s.city} ${s.area}`.trim() : "";
+    const act = mmWorkQuery === val;
+    return '<button type="button" class="mmSpotChip' + (act ? " active" : "") + '" data-q="' + escapeHtml(val) + '">' + escapeHtml(s.label) + "</button>";
+  }).join("");
+
+  const step2Html = userIntent === "buy"
+    ? '<div class="mmStep">' +
+        '<div class="mmStepLabel"><span>2. 购房总预算与户型</span><b class="num">' + mmBuyBudgetWan + ' 万（首付约' + downPreview + '万 · 月供¥' + fmt(payPreview) + '）</b></div>' +
+        '<input id="mmBuySlider" class="mmRange" type="range" min="40" max="1200" step="10" value="' + mmBuyBudgetWan + '">' +
+        '<div class="mmPillRow">' +
+          [[70, "70㎡ 刚需两房"], [95, "95㎡ 主流三房"], [125, "125㎡ 舒适四房"]].map(([a, lbl]) =>
+            '<button type="button" class="mmOptBtn' + (mmBuyArea === a ? " active" : "") + '" data-barea="' + a + '">' + lbl + "</button>"
+          ).join("") +
+        "</div>" +
+        '<div class="mmPillRow">' +
+          [["commute", "离上班更近"], ["afford", "总价低月供轻"], ["hold", "核心保值抗跌"], ["value", "超跌高性价比"]].map(([k, lbl]) =>
+            '<button type="button" class="mmOptBtn' + (mmBuyPref === k ? " active" : "") + '" data-bpref="' + k + '">' + lbl + "</button>"
+          ).join("") +
+        "</div>" +
+      "</div>"
+    : '<div class="mmStep">' +
+        '<div class="mmStepLabel"><span>2. 每月房租预算与户型</span><b class="num">¥' + fmt(mmRentBudgetYuan) + '/月（建议月薪 ≥¥' + fmt(salaryPreview) + '）</b></div>' +
+        '<input id="mmRentSlider" class="mmRange" type="range" min="500" max="15000" step="100" value="' + mmRentBudgetYuan + '">' +
+        '<div class="mmPillRow">' +
+          Object.values(RENT_LAYOUTS).map(l =>
+            '<button type="button" class="mmOptBtn' + (rentLayout === l.key ? " active" : "") + '" data-rlayout="' + l.key + '">' + l.label + "</button>"
+          ).join("") +
+        "</div>" +
+        '<div class="mmPillRow">' +
+          [["commute", "通勤省时间"], ["save", "房租更省钱"], ["comfort", "成熟生活圈"]].map(([k, lbl]) =>
+            '<button type="button" class="mmOptBtn' + (mmRentPref === k ? " active" : "") + '" data-rpref="' + k + '">' + lbl + "</button>"
+          ).join("") +
+        "</div>" +
+      "</div>";
+
+  let resHtml = "";
+  if (mmResults) {
+    if (!mmResults.items.length) {
+      resHtml = '<div class="mmEmpty">当前条件下暂未筛出合适片区，可尝试调高预算或将通勤圈放宽至 45km。</div>';
+    } else {
+      resHtml =
+        '<div class="mmResHead"><span>围绕「' + escapeHtml(mmResults.anchorName) + '」为您推荐 ' + mmResults.items.length + ' 个合适片区</span><small>点击看街道与小区</small></div>' +
+        '<div class="mmResList">' +
+        mmResults.items.map(it => {
+          const p = it.place;
+          const title = p.city === p.name ? p.name : `${p.city.replace(/市$/, "")} · ${p.name}`;
+          const distTag = it.dKm !== null ? `距上班点 ${it.dKm.toFixed(0)}km` : (p.province || "");
+          return '<div class="mmResCard" data-id="' + p.id + '">' +
+            '<div class="mmResTop">' +
+              '<div><strong>' + escapeHtml(title) + '</strong> <small>' + escapeHtml(distTag) + '</small></div>' +
+              '<span class="mmScoreBadge">' + it.score + '% 契合</span>' +
+            '</div>' +
+            '<div class="mmResMid"><b class="num">' + escapeHtml(it.costMain) + '</b><span>' + escapeHtml(it.costSub) + '</span></div>' +
+            '<div class="mmResFoot"><span>' + escapeHtml(it.reason) + '</span><span class="mmGoTxt">看小区 ›</span></div>' +
+          '</div>';
+        }).join("") +
+        "</div>";
+    }
+  }
+
+  mount.innerHTML =
+    '<div class="mmBox">' +
+      '<div class="mmHead">' +
+        '<div><strong>3步帮我找合适片区</strong><span class="mmSub">适合新手 · 结合预算与通勤自动匹配到区县与小区</span></div>' +
+        '<button type="button" class="linkBtn" id="mmCloseBtn">收起</button>' +
+      '</div>' +
+      '<div class="mmStep">' +
+        '<div class="mmStepLabel"><span>1. 您想在哪里买房/租房？（可填上班区域）</span></div>' +
+        '<div class="mmWorkRow">' +
+          '<input id="mmWorkInput" class="aiInput" type="text" placeholder="可填任意写字楼/地铁站/区县，如：深圳湾科技园 / 西二旗" value="' + escapeHtml(mmWorkQuery) + '">' +
+          '<select id="mmCommuteSel" class="mmSelect" aria-label="最大通勤距离">' +
+            [[8, "8km内 骑行近距"], [15, "15km内 近距"], [30, "30km内 主流"], [48, "48km内 跨城"]].map(([km, t]) => '<option value="' + km + '"' + (mmCommuteKm === km ? " selected" : "") + '>' + t + "</option>").join("") +
+          "</select>" +
+        "</div>" +
+        '<div class="mmSpotRow">' + spotsHtml + "</div>" +
+      "</div>" +
+      step2Html +
+      '<button type="button" class="mmSubmitBtn" id="mmRunBtn">为我匹配合适片区</button>' +
+      resHtml +
+    "</div>";
+
+  document.getElementById("mmCloseBtn").onclick = () => {
+    matchmakerOpen = false;
+    document.getElementById("openMatchmakerBtn")?.classList.remove("active");
+    renderMatchmakerPanel();
+  };
+  const wInput = document.getElementById("mmWorkInput");
+  wInput.oninput = e => { mmWorkQuery = e.target.value; };
+  wInput.onkeydown = e => { if (e.key === "Enter") runPersonalMatchmaker(); };
+  document.getElementById("mmCommuteSel").onchange = e => { mmCommuteKm = Number(e.target.value); };
+
+  mount.querySelectorAll(".mmSpotChip").forEach(btn => {
+    btn.onclick = () => {
+      mmWorkQuery = btn.dataset.q;
+      renderMatchmakerPanel();
+    };
+  });
+
+  const buySlider = document.getElementById("mmBuySlider");
+  if (buySlider) {
+    buySlider.oninput = e => {
+      mmBuyBudgetWan = Number(e.target.value);
+      const dp = (mmBuyBudgetWan * calcDown).toFixed(0);
+      const mp = Math.round(calcMonthlyPayment(mmBuyBudgetWan * 10000 * (1 - calcDown), calcRate, 30));
+      buySlider.previousElementSibling.querySelector("b").textContent = `${mmBuyBudgetWan} 万（首付约${dp}万 · 月供¥${fmt(mp)}）`;
+    };
+  }
+  const rentSlider = document.getElementById("mmRentSlider");
+  if (rentSlider) {
+    rentSlider.oninput = e => {
+      mmRentBudgetYuan = Number(e.target.value);
+      const sal = Math.round((mmRentBudgetYuan / 0.3) / 100) * 100;
+      rentSlider.previousElementSibling.querySelector("b").textContent = `¥${fmt(mmRentBudgetYuan)}/月（建议月薪 ≥¥${fmt(sal)}）`;
+    };
+  }
+
+  mount.querySelectorAll("[data-barea]").forEach(b => { b.onclick = () => { mmBuyArea = Number(b.dataset.barea); renderMatchmakerPanel(); }; });
+  mount.querySelectorAll("[data-bpref]").forEach(b => { b.onclick = () => { mmBuyPref = b.dataset.bpref; renderMatchmakerPanel(); }; });
+  mount.querySelectorAll("[data-rlayout]").forEach(b => { b.onclick = () => { setRentLayout(b.dataset.rlayout); }; });
+  mount.querySelectorAll("[data-rpref]").forEach(b => { b.onclick = () => { mmRentPref = b.dataset.rpref; renderMatchmakerPanel(); }; });
+
+  document.getElementById("mmRunBtn").onclick = runPersonalMatchmaker;
+
+  mount.querySelectorAll(".mmResCard").forEach(card => {
+    card.onclick = () => {
+      const id = card.dataset.id;
+      locateRegion(id);
+    };
+  });
+}
+
+function toggleMatchmaker(forceState) {
+  matchmakerOpen = typeof forceState === "boolean" ? forceState : !matchmakerOpen;
+  document.getElementById("openMatchmakerBtn")?.classList.toggle("active", matchmakerOpen);
+  renderMatchmakerPanel();
+  if (matchmakerOpen) {
+    document.querySelector(".sideScroll")?.scrollTo({ top: 0, behavior: "smooth" });
+  }
+}
+
+// ============================================================================
+// Arbitrary-Point + Zoom-Adaptive Multi-Scale Commute Circle Engine
+// ============================================================================
+
+const COMMUTE_RING_TIERS = {
+  doorway: {
+    key: "doorway",
+    shortDesc: "100/250/400m",
+    rings: [0.4, 0.25, 0.1],
+    labels: ["0-100m 楼下圈", "100-250m 步行3分", "250-400m 街口圈"],
+    title: "500m内 楼下周边代表小区：",
+    minArbKm: 0.05,
+    maxArbKm: 0.8,
+  },
+  walk: {
+    key: "walk",
+    shortDesc: "200/500/800m",
+    rings: [0.8, 0.5, 0.2],
+    labels: ["0-200m 楼下圈", "200-500m 步行5分", "500-800m 地铁圈"],
+    title: "1km内 家门口低价板块/小区：",
+    minArbKm: 0.08,
+    maxArbKm: 1.5,
+  },
+  doorstep: {
+    key: "doorstep",
+    shortDesc: "500m/1/1.5km",
+    rings: [1.5, 1, 0.5],
+    labels: ["0-500m 步行圈", "500m-1km 社区圈", "1-1.5km 骑行圈"],
+    title: "2km内 社区周边高性价比板块/小区：",
+    minArbKm: 0.1,
+    maxArbKm: 2.5,
+  },
+  micro: {
+    key: "micro",
+    shortDesc: "1/2/3km",
+    rings: [3, 2, 1],
+    labels: ["0-1km 步行圈", "1-2km 骑行圈", "2-3km 接驳圈"],
+    title: "3km内 步行骑行低价板块/小区：",
+    minArbKm: 0.15,
+    maxArbKm: 4.2,
+  },
+  near: {
+    key: "near",
+    shortDesc: "1/3/5km",
+    rings: [5, 3, 1],
+    labels: ["0-1km 步行圈", "1-3km 骑行圈", "3-5km 3站地铁"],
+    title: "5km内 近距高性价比街道/小区：",
+    minArbKm: 0.25,
+    maxArbKm: 6.5,
+  },
+  street: {
+    key: "street",
+    shortDesc: "2/5/10km",
+    rings: [10, 5, 2],
+    labels: ["0-2km 步行骑行", "2-5km 近距地铁", "5-10km 跨板块"],
+    title: "10km内 周边高性价比街道/片区：",
+    minArbKm: 0.5,
+    maxArbKm: 11.5,
+  },
+  urban: {
+    key: "urban",
+    shortDesc: "5/10/20km",
+    rings: [20, 10, 5],
+    labels: ["0-5km 近距圈", "5-10km 市内圈", "10-20km 跨区圈"],
+    title: "20km内 跨板块/跨区价格洼地：",
+    minArbKm: 1.5,
+    maxArbKm: 22,
+  },
+  suburb: {
+    key: "suburb",
+    shortDesc: "10/20/30km",
+    rings: [30, 20, 10],
+    labels: ["0-10km 城区圈", "10-20km 近郊圈", "20-30km 远郊圈"],
+    title: "30km内 都市通勤价格洼地：",
+    minArbKm: 2.5,
+    maxArbKm: 32,
+  },
+  metro: {
+    key: "metro",
+    shortDesc: "15/30/50km",
+    rings: [50, 30, 15],
+    labels: ["0-15km 核心圈", "15-30km 通勤圈", "30-50km 外溢圈"],
+    title: "50km内 跨区/跨城通勤洼地：",
+    minArbKm: 3.5,
+    maxArbKm: 49,
+  },
+  region: {
+    key: "region",
+    shortDesc: "30/60/100km",
+    rings: [100, 60, 30],
+    labels: ["0-30km 都市圈", "30-60km 城际圈", "60-100km 卫星城"],
+    title: "100km内 城市群低价卫星城/区县：",
+    minArbKm: 8,
+    maxArbKm: 100,
+  },
+  cluster: {
+    key: "cluster",
+    shortDesc: "60/120/200km",
+    rings: [200, 120, 60],
+    labels: ["0-60km 都市圈", "60-120km 城际圈", "120-200km 跨城圈"],
+    title: "200km内 城市群低价周边城市：",
+    minArbKm: 15,
+    maxArbKm: 200,
+  },
+  macro: {
+    key: "macro",
+    shortDesc: "120/250/400km",
+    rings: [400, 250, 120],
+    labels: ["0-120km 都市群", "120-250km 省际圈", "250-400km 区域圈"],
+    title: "400km内 区域经济圈低价城市：",
+    minArbKm: 30,
+    maxArbKm: 400,
+  },
+  national: {
+    key: "national",
+    shortDesc: "250/500/800km",
+    rings: [800, 500, 250],
+    labels: ["0-250km 核心群", "250-500km 邻省圈", "500-800km 高铁圈"],
+    title: "800km内 3小时高铁圈低价城市：",
+    minArbKm: 60,
+    maxArbKm: 800,
+  },
+};
+
+let commuteRingMode = "auto"; // "auto" | "micro" | "street" | "urban" | "metro"
+let commuteFreeClick = true;
+let draggingCommutePin = false;
+let lastResolvedCommuteTierKey = "";
+
+function syncCommuteTitleBadge(tier) {
+  const titleEl = document.getElementById("radiusTitleSpan");
+  if (!titleEl || !tier) return;
+  titleEl.textContent = commuteRingMode === "auto"
+    ? `都市通勤圈 · 自动 (${tier.shortDesc})`
+    : `都市通勤圈 · 锁定 (${tier.shortDesc})`;
+}
+
+function wgs84ToGcj02Client(lon, lat) {
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return [lon, lat];
+  if (lon < 72.004 || lon > 137.8347 || lat < 0.8293 || lat > 55.8271) return [lon, lat];
+  if (lon >= 119.8 && lon <= 122.3 && lat >= 21.7 && lat <= 25.5) return [lon, lat]; // Taiwan uses WGS84
+  const a = 6378245.0, ee = 0.00669342162296594323;
+  const x = lon - 105.0, y = lat - 35.0;
+  let dLat = -100 + 2 * x + 3 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+  dLat += ((20 * Math.sin(6 * x * Math.PI) + 20 * Math.sin(2 * x * Math.PI)) * 2) / 3;
+  dLat += ((20 * Math.sin(y * Math.PI) + 40 * Math.sin((y / 3) * Math.PI)) * 2) / 3;
+  dLat += ((160 * Math.sin((y / 12) * Math.PI) + 320 * Math.sin((y * Math.PI) / 30)) * 2) / 3;
+  let dLon = 300 + x + 2 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+  dLon += ((20 * Math.sin(6 * x * Math.PI) + 20 * Math.sin(2 * x * Math.PI)) * 2) / 3;
+  dLon += ((20 * Math.sin(x * Math.PI) + 40 * Math.sin((x / 3) * Math.PI)) * 2) / 3;
+  dLon += ((150 * Math.sin((x / 12) * Math.PI) + 300 * Math.sin((x / 30) * Math.PI)) * 2) / 3;
+  const radLat = (lat / 180.0) * Math.PI;
+  let magic = Math.sin(radLat);
+  magic = 1 - ee * magic * magic;
+  const sqrtMagic = Math.sqrt(magic);
+  dLat = (dLat * 180.0) / (((a * (1 - ee)) / (magic * sqrtMagic)) * Math.PI);
+  dLon = (dLon * 180.0) / ((a / sqrtMagic) * Math.cos(radLat) * Math.PI);
+  return [Number((lon + dLon).toFixed(6)), Number((lat + dLat).toFixed(6))];
+}
+
+function getActiveCommuteTier() {
+  if (commuteRingMode !== "auto" && COMMUTE_RING_TIERS[commuteRingMode]) {
+    return COMMUTE_RING_TIERS[commuteRingMode];
+  }
+  // Compute real screen pixels per kilometer so the outer ring spans ~35%-60% of the map viewport (~290-560px diameter)
+  const refLat = commuteAnchor?.lat || 31;
+  const refLon = commuteAnchor?.lon || 114;
+  const p0 = projectLonLat(refLon, refLat);
+  const pN = projectLonLat(refLon, refLat + 1 / 111.12);
+  const uy = Math.max(0.01, Math.abs(pN.y - p0.y));
+  const vb = svg.viewBox.baseVal;
+  const cw = mapShell?.clientWidth || 960;
+  const ch = mapShell?.clientHeight || 820;
+  const svgToCss = vb && vb.width > 0 ? Math.min(cw / vb.width, ch / vb.height) : 0.55;
+  const pxPerKm = uy * state.scale * svgToCss;
+  const targetOuterPx = Math.max(165, Math.min(cw, ch) * 0.225);
+  const idealOuterKm = targetOuterPx / Math.max(0.04, pxPerKm);
+
+  if (idealOuterKm <= 0.56) return COMMUTE_RING_TIERS.doorway;
+  if (idealOuterKm <= 1.10) return COMMUTE_RING_TIERS.walk;
+  if (idealOuterKm <= 2.12) return COMMUTE_RING_TIERS.doorstep;
+  if (idealOuterKm <= 3.87) return COMMUTE_RING_TIERS.micro;
+  if (idealOuterKm <= 7.07) return COMMUTE_RING_TIERS.near;
+  if (idealOuterKm <= 14.1) return COMMUTE_RING_TIERS.street;
+  if (idealOuterKm <= 24.5) return COMMUTE_RING_TIERS.urban;
+  if (idealOuterKm <= 38.7) return COMMUTE_RING_TIERS.suburb;
+  if (idealOuterKm <= 70.7) return COMMUTE_RING_TIERS.metro;
+  if (idealOuterKm <= 141.4) return COMMUTE_RING_TIERS.region;
+  if (idealOuterKm <= 282.8) return COMMUTE_RING_TIERS.cluster;
+  if (idealOuterKm <= 565.7) return COMMUTE_RING_TIERS.macro;
+  return COMMUTE_RING_TIERS.national;
+}
+
+function nearestRegionAtContentPt(x, y) {
+  let best = null, bestD2 = Infinity;
+  const preferDist = coveredProvinces.size > 0;
+  for (let i = 0; i < places.length; i += 1) {
+    const r = places[i];
+    if (!r.price) continue;
+    if (preferDist && r.dataLevel === "city" && coveredProvinces.has(r.province)) continue;
+    const d2 = (r.cx - x) ** 2 + (r.cy - y) ** 2;
+    if (d2 < bestD2) { bestD2 = d2; best = r; }
+  }
+  return best;
+}
+
+function setCommuteAnchorFreeContentPt(x, y, customLabel = "", hitRegion = null, updatePanelNow = true) {
+  const [lon, lat] = svgToLonLat(x, y);
+  const nearR = hitRegion || nearestRegionAtContentPt(x, y);
+  const regionLabel = nearR ? (nearR.city === nearR.name ? nearR.name : `${nearR.city.replace(/市$/, "")}·${nearR.name}`) : "地图自选点";
+  const label = customLabel || `${regionLabel}自选点`;
+  commuteAnchor = {
+    id: nearR?.id || "",
+    lon,
+    lat,
+    x,
+    y,
+    prov: nearR?.province || "",
+    name: label,
+    price: nearR?.price || null,
+    rentYield: nearR ? effectiveRentYield(nearR) : 2.1,
+    custom: true,
+  };
+  renderCommuteOverlay();
+  if (updatePanelNow) updateCommutePanel();
+}
+
+function setCommuteAnchorLonLat(lon, lat, customLabel = "", flyScale = 0) {
+  const pt = projectLonLat(lon, lat);
+  setCommuteAnchorFreeContentPt(pt.x, pt.y, customLabel, null, true);
+  if (flyScale > 0) {
+    focusLonLat(lon, lat, Math.max(state.scale, flyScale), true);
+  }
+}
+
+async function searchCommutePoiCandidates(q) {
+  const query = String(q || "").trim();
+  if (!query) return [];
+  const results = [];
+
+  // 1. Match street/business-circle plates first
+  await ensureStreetPlatesLoaded();
+  for (const hit of plateSearchIndex) {
+    if (`${hit.city}${hit.district}${hit.n}`.includes(query)) {
+      const dist = places.find(p => p.sk === hit.sk) || regions.find(c => c.city.includes(hit.city));
+      if (dist) {
+        const dp = streetPlatesCache.platesByDistrict?.[hit.sk];
+        const seed = (strHash(hit.sk) % 12) * 0.26;
+        const span = dist.span || 2.2;
+        const theta = seed + (hit.pIdx + 1) * 2.39996;
+        const rad = Math.min(span * (0.20 + 0.09 * Math.sqrt(hit.pIdx + 1)), 0.8);
+        const [lon, lat] = svgToLonLat(dist.cx + Math.cos(theta) * rad, dist.cy + Math.sin(theta) * rad * 0.78);
+        results.push({ name: `${hit.city}·${hit.district}·${hit.n}`, sub: `板块均价 ${fmt(hit.p)} 元/㎡`, lon, lat });
+        if (results.length >= 3) break;
+      }
+    }
+  }
+
+  // 2. Geocode arbitrary buildings / subway stations / landmarks (WGS84 -> GCJ02)
+  try {
+    if (HAS_LOCAL_API) {
+      const r = await fetch(`/api/poi?q=${encodeURIComponent(query)}`);
+      if (r.ok) {
+        const j = await r.json();
+        if (j.ok && Array.isArray(j.results)) results.push(...j.results);
+      }
+    } else {
+      const nom = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=4&countrycodes=cn,hk,mo,tw&accept-language=zh-CN&q=${encodeURIComponent(query)}`);
+      if (nom.ok) {
+        const arr = await nom.json();
+        (arr || []).forEach(it => {
+          const [gLon, gLat] = wgs84ToGcj02Client(Number(it.lon), Number(it.lat));
+          const parts = String(it.display_name || "").split(",").map(s => s.trim()).filter(Boolean);
+          results.push({ name: parts[0] || query, sub: parts.slice(1, 4).join(" · "), lon: gLon, lat: gLat });
+        });
+      }
+    }
+  } catch (_) {}
+
+  // 3. Match loaded districts/cities fallback
+  if (!results.length) {
+    for (const p of places) {
+      if (`${p.city}${p.name}`.includes(query)) {
+        const [lon, lat] = svgToLonLat(p.cx, p.cy);
+        results.push({ name: p.city === p.name ? p.name : `${p.city}·${p.name}`, sub: p.province || "", lon, lat });
+        if (results.length >= 4) break;
+      }
+    }
+  }
+  return results.slice(0, 5);
+}
+
+function updateCommutePanelMultiScale() {
+  if (!commuteActive || !commuteAnchor || !radiusAnchorInfo) return;
+  const { lon, lat, name, price, prov, rentYield } = commuteAnchor;
+  const tier = getActiveCommuteTier();
+  lastResolvedCommuteTierKey = tier.key;
+  const [rOuter, rMid, rInner] = tier.rings; // e.g. [10, 5, 2] -> inner=2, mid=5, outer=10
+
+  // Auto-load target & neighboring metro provinces for cross-city accuracy
+  if (prov) {
+    const provs = [prov, ...(CROSS_PROVINCE_METRO_NEIGHBORS[prov] || [])];
+    provs.forEach(pv => {
+      const src = detailSources.find(s => s.prov === pv);
+      if (src && !loadedDetailSources.has(src.id) && !loadingDetailSources.has(src.id)) {
+        loadDetailSource(src).then(() => updateCommutePanel());
+      }
+    });
+  }
+  if (rOuter <= 25 && !streetPlatesCache && !streetPlatesLoading) {
+    ensureStreetPlatesLoaded().then(() => updateCommutePanel());
+  }
+
+  const isRent = userIntent === "rent";
+  const anchorVal = isRent
+    ? (price ? estMonthlyRentFromUnit(price, rentYield || 2.1, rentLayout) : null)
+    : price;
+
+  const b1 = [], b2 = [], b3 = [], arbitrage = [];
+  const seenArbNames = new Set();
+
+  // A0. Include loaded Community (Xiaoqu) pins when zoomed into <= 5km micro/walking rings
+  if (rOuter <= 5 && typeof activePlateCommunities !== "undefined" && activePlateCommunities.length) {
+    for (let i = 0; i < activePlateCommunities.length; i += 1) {
+      const it = activePlateCommunities[i];
+      const det = (typeof selectedCommunityDetail !== "undefined" && selectedCommunityDetail?.id === it.id)
+        ? selectedCommunityDetail
+        : (typeof xqBrowserCache !== "undefined" ? xqBrowserCache.details[`${it.c}:${it.id}`]?.detail : null)
+          || (typeof cityShardCache !== "undefined" ? cityShardCache.get(it.c)?.details?.[it.id] : null);
+      if (!det?.lng || !det?.lat || !it.p) continue;
+      const dKm = haversineKm(lon, lat, det.lng, det.lat);
+      const val = isRent ? estMonthlyRentFromUnit(it.p, det.estRentYield || rentYield || 2.1, rentLayout) : it.p;
+      if (!val) continue;
+      if (dKm <= rInner) b1.push(val);
+      else if (dKm <= rMid) b2.push(val);
+      else if (dKm <= rOuter) b3.push(val);
+      const arbLabel = `小区·${it.n}`;
+      if (anchorVal && dKm >= tier.minArbKm && dKm <= tier.maxArbKm && val < anchorVal * 0.90 && !seenArbNames.has(arbLabel)) {
+        seenArbNames.add(arbLabel);
+        arbitrage.push({
+          label: arbLabel,
+          dKm,
+          val,
+          savePct: Math.max(1, Math.round((1 - val / anchorVal) * 100)),
+          xqId: it.id,
+        });
+      }
+    }
+  }
+
+  // A. Include Street/Business-Circle Plates when zoomed into <= 25km rings!
+  if (rOuter <= 25 && streetPlatesCache?.platesByDistrict) {
+    for (let i = 0; i < places.length; i += 1) {
+      const dist = places[i];
+      if (!dist.sk || dist.dataLevel === "city") continue;
+      const [dLon, dLat] = svgToLonLat(dist.cx, dist.cy);
+      if (haversineKm(lon, lat, dLon, dLat) > rOuter + 18) continue;
+      const dp = streetPlatesCache.platesByDistrict[dist.sk];
+      if (!dp?.plates?.length) continue;
+      const seed = (strHash(dist.sk) % 12) * 0.26;
+      const span = dist.span || 2.6;
+      const dYld = effectiveRentYield(dist);
+      dp.plates.forEach((pl, k) => {
+        const theta = seed + (k + 1) * 2.39996;
+        const rad = Math.min(span * (0.20 + 0.09 * Math.sqrt(k + 1)), 1.1);
+        const [pLon, pLat] = svgToLonLat(dist.cx + Math.cos(theta) * rad, dist.cy + Math.sin(theta) * rad * 0.78);
+        const dKm = haversineKm(lon, lat, pLon, pLat);
+        const val = isRent ? estMonthlyRentFromUnit(pl.p, dYld, rentLayout) : pl.p;
+        if (!val) return;
+        if (dKm <= rInner) b1.push(val);
+        else if (dKm <= rMid) b2.push(val);
+        else if (dKm <= rOuter) b3.push(val);
+        const arbLabel = `${dist.name.replace(/[区县市]$/, "")}·${pl.n}`;
+        if (anchorVal && dKm >= tier.minArbKm && dKm <= tier.maxArbKm && val < anchorVal * 0.82 && !seenArbNames.has(arbLabel)) {
+          seenArbNames.add(arbLabel);
+          arbitrage.push({
+            label: arbLabel,
+            dKm,
+            val,
+            savePct: Math.round((1 - val / anchorVal) * 100),
+            distId: dist.id,
+            pIdx: k,
+          });
+        }
+      });
+    }
+  }
+
+  // B. Include Districts / Cities
+  const preferDistricts = loadedDetailSources.size > 0;
+  for (let i = 0; i < places.length; i += 1) {
+    const r = places[i];
+    if (!r.price || (preferDistricts && r.dataLevel === "city" && coveredProvinces.has(r.province))) continue;
+    const [rLon, rLat] = svgToLonLat(r.cx, r.cy);
+    const dKm = haversineKm(lon, lat, rLon, rLat);
+    const val = isRent ? estPlaceMonthlyRent(r, rentLayout) : r.price;
+    if (!val) continue;
+    if (dKm <= rInner) b1.push(val);
+    else if (dKm <= rMid) b2.push(val);
+    else if (dKm <= rOuter) b3.push(val);
+    const arbLabel = r.city === r.name ? r.name : `${r.city.replace(/市$/, "")}·${r.name}`;
+    if (anchorVal && dKm >= tier.minArbKm && dKm <= tier.maxArbKm && val < anchorVal * 0.80 && !isInherited(r) && !seenArbNames.has(arbLabel)) {
+      seenArbNames.add(arbLabel);
+      arbitrage.push({
+        label: arbLabel,
+        dKm,
+        val,
+        savePct: Math.round((1 - val / anchorVal) * 100),
+        id: r.id,
+      });
+    }
+  }
+
+  const fmtCell = v => (!v ? "--" : (isRent ? fmtRentShort(v) : fmtWan(v)));
+  const coordStr = `${lon.toFixed(3)}°, ${lat.toFixed(3)}°`;
+  const refStr = anchorVal ? (isRent ? `周边月租约 ${fmtRentShort(anchorVal)}` : `周边均价约 ${fmt(price)} 元/㎡`) : "";
+
+  radiusAnchorInfo.innerHTML =
+    `起点：<b>${escapeHtml(name)}</b> <small style="color:var(--ink-muted)">(${coordStr})</small>` +
+    (refStr ? `<br><span>${escapeHtml(refStr)} · 可点图任意处或拖拽起点图钉</span>` : `<br><span>可直接点击地图任意位置或按住起点图钉拖拽</span>`);
+
+  if (!b1.length && anchorVal) b1.push(anchorVal);
+  const m1 = medianNum(b1), m2 = medianNum(b2), m3 = medianNum(b3);
+  radiusRingStats.innerHTML =
+    '<div class="ringStatCell"><span>' + tier.labels[0] + '</span><b>' + fmtCell(m1) + '</b></div>' +
+    '<div class="ringStatCell"><span>' + tier.labels[1] + '</span><b>' + fmtCell(m2) + '</b></div>' +
+    '<div class="ringStatCell"><span>' + tier.labels[2] + '</span><b>' + fmtCell(m3) + '</b></div>';
+
+  arbitrage.sort((a, b) => b.savePct - a.savePct || a.dKm - b.dKm);
+  const topArb = arbitrage.slice(0, 5);
+  radiusArbitrage.innerHTML = topArb.length
+    ? '<div style="font-size:12px;font-weight:800;color:var(--ink-secondary);margin-top:2px">' + escapeHtml(tier.title) + '</div>' +
+      topArb.map((item, idx) =>
+        '<div class="arbItem" data-arb-idx="' + idx + '"><span><b>' + escapeHtml(item.label) + '</b> <small style="color:var(--ink-muted)">' + (item.dKm < 1 ? Math.round(item.dKm * 1000) + "m" : item.dKm.toFixed(1) + "km") + '</small></span><span><b style="color:var(--down)">省' + item.savePct + '%</b> · ' + fmtCell(item.val) + '</span></div>'
+      ).join("")
+    : '<div style="font-size:12px;color:var(--ink-muted)">当前半径内价格较均衡；可拖拽起点图钉到核心商务区或切换更大半径发现周边低价片区。</div>';
+
+  radiusArbitrage.querySelectorAll(".arbItem").forEach(el => {
+    el.onclick = () => {
+      const it = topArb[Number(el.dataset.arbIdx)];
+      if (!it) return;
+      if (it.xqId && typeof onTapCommunityPin === "function") {
+        onTapCommunityPin(it.xqId);
+      } else if (it.distId !== undefined && it.pIdx !== undefined) {
+        selectStreetPlate(it.distId, it.pIdx, true);
+      } else if (it.id) {
+        locateRegion(it.id);
+      }
+    };
+  });
+}
+
+function initCommuteControlsUX() {
+  const freeBtn = document.getElementById("toggleFreeClickBtn");
+  const myLocBtn = document.getElementById("commuteMyLocBtn");
+  const poiInput = document.getElementById("commutePoiInput");
+  const poiBtn = document.getElementById("commutePoiBtn");
+  const candBox = document.getElementById("commutePoiCandidates");
+
+  const syncFreeCursor = () => {
+    svg.classList.toggle("commuteFreeClick", Boolean(commuteActive && commuteFreeClick));
+    if (freeBtn) {
+      freeBtn.classList.toggle("active", commuteFreeClick);
+      freeBtn.textContent = commuteFreeClick ? "点图自由设圆心: 开" : "点图自由设圆心: 关";
+    }
+  };
+
+  if (freeBtn) {
+    freeBtn.onclick = () => {
+      commuteFreeClick = !commuteFreeClick;
+      syncFreeCursor();
+      showToast(commuteFreeClick ? "已开启：点击地图任意位置即可设为通勤起点" : "已关闭点图设圆心（仍可拖拽起点图钉）");
+    };
+  }
+
+  document.querySelectorAll(".ringModeBtn").forEach(btn => {
+    btn.onclick = () => {
+      commuteRingMode = btn.dataset.rmode;
+      document.querySelectorAll(".ringModeBtn").forEach(b => b.classList.toggle("active", b === btn));
+      renderCommuteOverlay();
+      updateCommutePanel();
+    };
+  });
+
+  if (myLocBtn) {
+    myLocBtn.onclick = () => {
+      if (!navigator.geolocation) {
+        showToast("当前浏览器不支持地理定位，可直接点击地图或输入地点");
+        return;
+      }
+      myLocBtn.textContent = "定位中...";
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          myLocBtn.textContent = "定位当前处";
+          const [gLon, gLat] = wgs84ToGcj02Client(pos.coords.longitude, pos.coords.latitude);
+          setCommuteAnchorLonLat(gLon, gLat, "我的当前位置", 20);
+          showToast("已将您的当前位置设为通勤起点");
+        },
+        () => {
+          myLocBtn.textContent = "定位当前处";
+          showToast("无法获取定位权限，请直接点击地图或输入写字楼/地铁站名称");
+        },
+        { timeout: 7000 }
+      );
+    };
+  }
+
+  const doPoiSearch = async () => {
+    const q = poiInput?.value.trim();
+    if (!q) {
+      showToast("请输入写字楼、地铁站或街道名称，或直接点击地图任意位置");
+      return;
+    }
+    poiBtn.disabled = true;
+    poiBtn.textContent = "检索...";
+    try {
+      const list = await searchCommutePoiCandidates(q);
+      if (!list.length) {
+        candBox.style.display = "none";
+        showToast("未找到该地点，您可开启「底图」后直接在地图上点击设圆心");
+        return;
+      }
+      if (list.length === 1) {
+        candBox.style.display = "none";
+        setCommuteAnchorLonLat(list[0].lon, list[0].lat, list[0].name, 65);
+        showToast(`已将通勤圆心设为：${list[0].name}`);
+        return;
+      }
+      candBox.style.display = "flex";
+      candBox.innerHTML = list.map((it, i) =>
+        '<button type="button" class="poiCandItem" data-pidx="' + i + '"><b>' + escapeHtml(it.name) + '</b>' + (it.sub ? '<small>' + escapeHtml(it.sub) + '</small>' : '') + '</button>'
+      ).join("");
+      candBox.querySelectorAll(".poiCandItem").forEach(el => {
+        el.onclick = () => {
+          const picked = list[Number(el.dataset.pidx)];
+          candBox.style.display = "none";
+          setCommuteAnchorLonLat(picked.lon, picked.lat, picked.name, 65);
+          showToast(`已将通勤圆心设为：${picked.name}`);
+        };
+      });
+    } finally {
+      poiBtn.disabled = false;
+      poiBtn.textContent = "设圆心";
+    }
+  };
+
+  if (poiBtn) poiBtn.onclick = doPoiSearch;
+  if (poiInput) poiInput.onkeydown = e => { if (e.key === "Enter") doPoiSearch(); };
+  window.__syncCommuteFreeCursor = syncFreeCursor;
+}
+
+function initMatchmakerUX() {
+  initCommuteControlsUX();
+  syncEstRentMetricConfig();
+  document.querySelectorAll(".intentBtn[data-intent]").forEach(btn => {
+    btn.onclick = () => setIntentMode(btn.dataset.intent);
+    const on = btn.dataset.intent === userIntent;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  const mmBtn = document.getElementById("openMatchmakerBtn");
+  if (mmBtn) mmBtn.onclick = () => toggleMatchmaker();
+
+  // Open matchmaker gently by default on first visit when no URL deep-link region is specified
+  const hasUrlTarget = new URLSearchParams(location.search).has("region") || new URLSearchParams(location.search).has("view");
+  if (!hasUrlTarget) {
+    let dismissed = false;
+    try { dismissed = sessionStorage.getItem("atlas-mm-seen") === "1"; } catch (_) {}
+    if (!dismissed) {
+      matchmakerOpen = true;
+      mmBtn?.classList.add("active");
+      try { sessionStorage.setItem("atlas-mm-seen", "1"); } catch (_) {}
+    }
+  }
+
+  if (userIntent === "rent") {
+    setIntentMode("rent", true);
+  } else {
+    renderMatchmakerPanel();
+    updateNavBreadcrumb();
   }
 }
 
@@ -1565,6 +3000,17 @@ const METRIC_CONFIGS = {
     getValue: r => r.newPrice || null,
     fmtMap: v => fmtWan(v),
     fmtRow: v => fmt(v) + " 元/㎡",
+  },
+  estRent: {
+    title: "预估月租金 · 整租两居（约65㎡主流两室，元/月）",
+    short: "月租(两居)",
+    unit: "元/月",
+    breaks: [0, 1100, 1600, 2300, 3200, 4500, 6800, 10000, 60000],
+    colors: ["#1f7a68", "#48a68f", "#8ad1b8", "#d7ebc2", "#f5d087", "#eb8d4e", "#c9443b", "#781530"],
+    labels: ["<1.1k", "1.1k-1.6k", "1.6k-2.3k", "2.3k-3.2k", "3.2k-4.5k", "4.5k-6.8k", "6.8k-1万", "1万+"],
+    getValue: r => (typeof estPlaceMonthlyRent === "function" ? estPlaceMonthlyRent(r) : null),
+    fmtMap: v => (v >= 10000 ? "¥" + (v / 10000).toFixed(1) + "万" : "¥" + fmt(v)),
+    fmtRow: v => "¥" + fmt(v) + "/月",
   },
   yoy: {
     title: "住宅价格同比涨跌幅（%，红涨绿跌）",
@@ -1638,7 +3084,7 @@ let places = [...regions];
 let placeById = new Map(places.map(p => [p.id, p]));
 const svg = document.getElementById("map"), viewport = document.getElementById("viewport"), mapShell = document.querySelector(".mapShell");
 const tileBuffers = [document.getElementById("tileLayerA"), document.getElementById("tileLayerB")];
-const detailLayer = document.getElementById("detailLayer"), detailBoundaries = document.getElementById("detailBoundaries"), commuteRingLayer = document.getElementById("commuteRingLayer"), dynamicLabels = document.getElementById("dynamicLabels"), streetPlateLayer = document.getElementById("streetPlateLayer");
+const detailLayer = document.getElementById("detailLayer"), detailBoundaries = document.getElementById("detailBoundaries"), commuteRingLayer = document.getElementById("commuteRingLayer"), commuteOriginLayer = document.getElementById("commuteOriginLayer"), dynamicLabels = document.getElementById("dynamicLabels"), streetPlateLayer = document.getElementById("streetPlateLayer");
 const overlayOpacityInput = document.getElementById("overlayOpacity"), overlayOpacityValue = document.getElementById("overlayOpacityValue");
 const labelScaleInput = document.getElementById("labelScale"), labelScaleValue = document.getElementById("labelScaleValue");
 const toggleLabelsButton = document.getElementById("toggleLabels"), toggleFineModeButton = document.getElementById("toggleFineMode"), toggleTilesButton = document.getElementById("toggleTiles"), toggleTimelineButton = document.getElementById("toggleTimeline"), toggleRadiusButton = document.getElementById("toggleRadius"), resetButton = document.getElementById("reset");
@@ -1880,6 +3326,12 @@ function refreshLegendUI() {
   const cfg = activeColorConfig();
   const tlSuffix = timelineActive && tlMonths[tlIndex] ? ` · ${tlMonths[tlIndex]}` : "";
   legendTitleEl.textContent = cfg.title + tlSuffix;
+  const explainEl = document.getElementById("legendExplain");
+  if (explainEl && typeof METRIC_BEGINNER_TIPS !== "undefined") {
+    explainEl.textContent = timelineActive
+      ? "拖动下方时光轴滑块或点击播放，可回看近一年全国房价月度变化。"
+      : (METRIC_BEGINNER_TIPS[metricMode] || "");
+  }
   swatchesEl.innerHTML = cfg.colors.map((c, i) =>
     '<button type="button" class="swatchBtn' + (activeBin === i ? " active" : (activeBin >= 0 ? " muted" : "")) + '" data-bin="' + i + '" style="background:' + c + '" title="点击筛选 ' + cfg.labels[i] + '"></button>'
   ).join("");
@@ -1951,16 +3403,36 @@ function updateKPIs(filteredList) {
   if (kpiScopeTitleEl) kpiScopeTitleEl.textContent = scopeLabel;
   if (toggleKpiViewportBtn) toggleKpiViewportBtn.textContent = kpiViewportLinked ? "视野联动: 开" : "锁定全国";
 
-  const prices = sample.map(r => (timelineActive && tlMode === "price" ? effectiveMetricValue(r) : (metricMode === "newPrice" ? r.newPrice : r.price))).filter(Boolean);
-  const yields = sample.map(r => r.rentYield).filter(Number.isFinite);
-  const ptis = sample.map(r => r.priceToIncome).filter(Number.isFinite);
-  const medP = medianNum(prices);
-  const medY = medianNum(yields);
-  const medI = medianNum(ptis);
-  document.getElementById("kpiMedian").textContent = medP ? fmt(medP) + " 元" : "--";
-  document.getElementById("kpiYield").textContent = medY ? medY.toFixed(2) + "%" : "--";
-  document.getElementById("kpiPti").textContent = medI ? medI.toFixed(1) + " 年" : "--";
-  document.getElementById("kpiCount").textContent = fmt(sample.length) + " 个";
+  const isRent = typeof userIntent !== "undefined" && userIntent === "rent" && typeof estPlaceMonthlyRent === "function";
+  const kpiItems = document.querySelectorAll("#kpiStrip .kpiLabel");
+  if (isRent) {
+    const lCfg = RENT_LAYOUTS[rentLayout] || RENT_LAYOUTS.two;
+    const rents = sample.map(r => estPlaceMonthlyRent(r, rentLayout)).filter(Boolean);
+    const medRent = medianNum(rents);
+    const unitRents = sample.map(r => r.price ? (r.price * ((effectiveRentYield(r) || 2.1) / 100)) / 12 : null).filter(Boolean);
+    const medUnitR = medianNum(unitRents);
+    if (kpiItems[0]) kpiItems[0].textContent = `中位月租(${lCfg.short})`;
+    if (kpiItems[1]) kpiItems[1].textContent = "中位单平月租";
+    if (kpiItems[2]) kpiItems[2].textContent = "舒适月薪门槛";
+    document.getElementById("kpiMedian").textContent = medRent ? "¥" + fmt(medRent) : "--";
+    document.getElementById("kpiYield").textContent = medUnitR ? "¥" + medUnitR.toFixed(1) + "/㎡" : "--";
+    document.getElementById("kpiPti").textContent = medRent ? "¥" + fmt(Math.round((medRent / 0.3) / 100) * 100) : "--";
+    document.getElementById("kpiCount").textContent = fmt(sample.length) + " 个";
+  } else {
+    if (kpiItems[0]) kpiItems[0].textContent = "中位单价";
+    if (kpiItems[1]) kpiItems[1].textContent = "中位租金回报";
+    if (kpiItems[2]) kpiItems[2].textContent = "中位收入比";
+    const prices = sample.map(r => (timelineActive && tlMode === "price" ? effectiveMetricValue(r) : (metricMode === "newPrice" ? r.newPrice : r.price))).filter(Boolean);
+    const yields = sample.map(r => r.rentYield).filter(Number.isFinite);
+    const ptis = sample.map(r => r.priceToIncome).filter(Number.isFinite);
+    const medP = medianNum(prices);
+    const medY = medianNum(yields);
+    const medI = medianNum(ptis);
+    document.getElementById("kpiMedian").textContent = medP ? fmt(medP) + " 元" : "--";
+    document.getElementById("kpiYield").textContent = medY ? medY.toFixed(2) + "%" : "--";
+    document.getElementById("kpiPti").textContent = medI ? medI.toFixed(1) + " 年" : "--";
+    document.getElementById("kpiCount").textContent = fmt(sample.length) + " 个";
+  }
   updateLegendDistBar(sample);
 }
 
@@ -2031,6 +3503,9 @@ function mountDistrictPlatesUI(r) {
     const mount = document.getElementById("plateMount");
     if (!mount) return;
 
+    const isRent = typeof userIntent !== "undefined" && userIntent === "rent" && typeof estMonthlyRentFromUnit === "function";
+    const useYld = typeof effectiveRentYield === "function" ? effectiveRentYield(r) : 2.1;
+
     if (r.dataLevel === "city") {
       const shortCity = r.city.replace(/市$/, "");
       const cityPlates = [];
@@ -2056,7 +3531,7 @@ function mountDistrictPlatesUI(r) {
         top.map((pl, i) =>
           '<button type="button" class="plateChip" data-hit-idx="' + i + '">' +
           '<span class="plateChipName">' + escapeHtml(pl.district.replace(/[区县市]$/, "") + "·" + pl.n) + '</span>' +
-          '<span class="plateChipVal">' + fmtWan(pl.p) + '</span></button>'
+          '<span class="plateChipVal">' + (isRent ? fmtRentShort(estMonthlyRentFromUnit(pl.p, useYld)) : fmtWan(pl.p)) + '</span></button>'
         ).join("") +
         '</div><div id="xqMount"></div></div>';
       mount.querySelectorAll(".plateChip").forEach(btn => {
@@ -2072,30 +3547,40 @@ function mountDistrictPlatesUI(r) {
     let html = "";
 
     if (dp?.plates?.length) {
-      const calNote = dp.scaleFactor && dp.scaleFactor !== 1 ? `同城标尺校准 ×${dp.scaleFactor}` : "商圈/街道挂牌参考";
+      const calNote = isRent ? `${RENT_LAYOUTS[rentLayout].label}月租参考` : (dp.scaleFactor && dp.scaleFactor !== 1 ? `同城标尺校准 ×${dp.scaleFactor}` : "商圈/街道挂牌参考");
       let bannerHtml = "";
       if (selectedPlateInfo && selectedPlateInfo.distId === r.id) {
         const sp = selectedPlateInfo;
         const diffPct = r.price ? (((sp.p - r.price) / r.price) * 100) : null;
-        const diffTxt = diffPct !== null ? (diffPct >= 0 ? `较全区均价 +${diffPct.toFixed(1)}%` : `较全区均价 ${diffPct.toFixed(1)}%`) : "";
-        const totWan = ((sp.p * calcArea) / 10000).toFixed(1);
-        const mp = Math.round(calcMonthlyPayment(sp.p * calcArea * (1 - calcDown), calcRate, 30));
-        bannerHtml =
-          '<div class="plateSelectedBanner">' +
-          '<strong>' + escapeHtml(sp.n) + ' 街道/板块：' + fmt(sp.p) + ' 元/㎡</strong>' +
-          (sp.m ? ' <span style="color:var(--ink-secondary)">(' + escapeHtml(sp.m) + ')</span>' : '') +
-          '<br><span>' + [diffTxt, `${calcArea}㎡约 ${totWan}万 · 月供 ¥${fmt(mp)}`, sp.rp ? `原采集值 ${fmt(sp.rp)} 元/㎡` : ""].filter(Boolean).join(" · ") + '</span>' +
-          '</div>';
+        if (isRent) {
+          const spRent = estMonthlyRentFromUnit(sp.p, useYld);
+          const diffTxt = diffPct !== null ? (diffPct >= 0 ? `较全区月租 +${diffPct.toFixed(1)}%` : `较全区月租 ${diffPct.toFixed(1)}%`) : "";
+          bannerHtml =
+            '<div class="plateSelectedBanner">' +
+            '<strong>' + escapeHtml(sp.n) + ' 板块 · ' + RENT_LAYOUTS[rentLayout].label + '约 ¥' + fmt(spRent) + '/月</strong>' +
+            '<br><span>' + [diffTxt, `押一付三约 ¥${fmt(spRent * 4)}`, `二手均价 ${fmt(sp.p)} 元/㎡`].filter(Boolean).join(" · ") + '</span>' +
+            '</div>';
+        } else {
+          const diffTxt = diffPct !== null ? (diffPct >= 0 ? `较全区均价 +${diffPct.toFixed(1)}%` : `较全区均价 ${diffPct.toFixed(1)}%`) : "";
+          const totWan = ((sp.p * calcArea) / 10000).toFixed(1);
+          const mp = Math.round(calcMonthlyPayment(sp.p * calcArea * (1 - calcDown), calcRate, 30));
+          bannerHtml =
+            '<div class="plateSelectedBanner">' +
+            '<strong>' + escapeHtml(sp.n) + ' 街道/板块：' + fmt(sp.p) + ' 元/㎡</strong>' +
+            (sp.m ? ' <span style="color:var(--ink-secondary)">(' + escapeHtml(sp.m) + ')</span>' : '') +
+            '<br><span>' + [diffTxt, `${calcArea}㎡约 ${totWan}万 · 月供 ¥${fmt(mp)}`, sp.rp ? `原采集值 ${fmt(sp.rp)} 元/㎡` : ""].filter(Boolean).join(" · ") + '</span>' +
+            '</div>';
+        }
       }
       html +=
         '<div class="plateBox">' +
-        '<div class="plateHead"><span>核心街道 / 商圈板块房价 (' + dp.plates.length + ')</span><small>' + escapeHtml(calNote) + '</small></div>' +
+        '<div class="plateHead"><span>核心街道 / 商圈板块' + (isRent ? "月租" : "房价") + ' (' + dp.plates.length + ')</span><small>' + escapeHtml(calNote) + '</small></div>' +
         bannerHtml +
         '<div class="plateGrid">' +
         dp.plates.map((pl, idx) =>
           '<button type="button" class="plateChip' + (selectedPlateInfo && selectedPlateInfo.distId === r.id && selectedPlateInfo.n === pl.n ? " active" : "") + '" data-pidx="' + idx + '">' +
           '<span class="plateChipName">' + escapeHtml(pl.n) + '</span>' +
-          '<span class="plateChipVal">' + fmtWan(pl.p) + '</span></button>'
+          '<span class="plateChipVal">' + (isRent ? fmtRentShort(estMonthlyRentFromUnit(pl.p, useYld)) : fmtWan(pl.p)) + '</span></button>'
         ).join("") +
         '</div><div id="xqMount"></div></div>';
     } else {
@@ -2172,23 +3657,30 @@ function calcMonthlyPayment(principal, annualRatePct, years = 30) {
 }
 
 function renderEmptyDossier() {
-  const hotNames = ["深圳", "上海", "北京", "广州", "杭州", "成都", "香港", "台北市"];
+  const hotNames = ["深圳", "上海", "北京", "广州", "杭州", "成都", "石家庄", "武汉"];
   const hotChips = hotNames.map(n => {
     const found = places.find(p => p.name.includes(n) || p.city.includes(n));
     return found ? '<button type="button" class="quickChip" data-pick="' + found.id + '">' + escapeHtml(n.replace(/市$/, "")) + "</button>" : "";
   }).join("");
+  const isRent = typeof userIntent !== "undefined" && userIntent === "rent";
   selected.innerHTML =
-    '<div class="dossierCrumb">全国城市与区县房产分析台</div>' +
-    '<div class="dossierTitle">点击地图区域或搜索列表</div>' +
-    '<div class="sourceFoot">查看二手挂牌价、真实新房均价、同比/环比、年租金回报率、房价收入比、十年极值回撤及近12个月价格曲线，或将最多 4 个区域加入同屏对比。</div>' +
+    '<div class="dossierTitle">' + (isRent ? "点击地图或用「帮我找房」选租住片区" : "点击地图或用「帮我找房」选置业片区") + '</div>' +
+    '<div class="sourceFoot">' +
+      (isRent
+        ? "支持查看全国各城、区县、街道及代表小区的预估月租金、押一付三成本、舒适月薪门槛与实地看租避坑清单。"
+        : "支持从全国城市一路放大至区县、街道与代表小区，查看首付月供、近12个月走势及五维买房体检建议。") +
+    '</div>' +
     '<div class="quickPick">' + hotChips + "</div>";
   selected.querySelectorAll(".quickChip").forEach(btn => {
     btn.onclick = () => locateRegion(btn.dataset.pick);
   });
+  if (typeof updateNavBreadcrumb === "function") updateNavBreadcrumb();
 }
 
 function renderDossier(r) {
   if (!r) { renderEmptyDossier(); return; }
+  if (typeof updateNavBreadcrumb === "function") updateNavBreadcrumb();
+  const isRent = typeof userIntent !== "undefined" && userIntent === "rent" && typeof estPlaceMonthlyRent === "function";
   const inCmp = compareIds.includes(r.id);
   const favOn = isFav(r);
   const momN = pctNum(r.mom);
@@ -2204,10 +3696,11 @@ function renderDossier(r) {
   const downWan = totalWan * calcDown;
   const loanYuan = Math.max(0, r.price * calcArea * (1 - calcDown));
   const monthlyPay = r.price ? Math.round(calcMonthlyPayment(loanYuan, calcRate, 30)) : 0;
-  const estMonthlyRent = r.price && r.rentYield ? Math.round((r.price * calcArea * (r.rentYield / 100)) / 12) : null;
+  const useYld = typeof effectiveRentYield === "function" ? effectiveRentYield(r) : r.rentYield;
+  const estMonthlyRent = r.price && useYld ? Math.round((r.price * calcArea * (useYld / 100)) / 12) : null;
 
   let rangeHtml = "";
-  if (r.peakPrice && r.troughPrice && r.peakPrice > r.troughPrice && r.price) {
+  if (!isRent && r.peakPrice && r.troughPrice && r.peakPrice > r.troughPrice && r.price) {
     const pos = Math.max(2, Math.min(98, ((r.price - r.troughPrice) / (r.peakPrice - r.troughPrice)) * 100));
     const dd = r.drawdownPct ?? Number((((r.price - r.peakPrice) / r.peakPrice) * 100).toFixed(1));
     rangeHtml =
@@ -2221,6 +3714,52 @@ function renderDossier(r) {
   const crumb = [r.province, r.city !== r.province ? r.city : "", r.name !== r.city ? r.name : ""].filter(Boolean).join(" · ");
   const titleLabel = r.city === r.name ? r.name : `${r.city} ${r.name}`;
 
+  let heroAndMetricsHtml = "";
+  if (r.price && isRent) {
+    const lCfg = RENT_LAYOUTS[rentLayout] || RENT_LAYOUTS.two;
+    const layoutRent = estPlaceMonthlyRent(r, rentLayout) || 0;
+    const unitRent = ((r.price * ((useYld || 2.1) / 100)) / 12).toFixed(1);
+    const sameAreaMortgage = Math.round(calcMonthlyPayment(r.price * lCfg.eqSqm * (1 - calcDown), calcRate, 30));
+    const safeSalary = Math.round((layoutRent / 0.3) / 100) * 100;
+    const layoutBtns = Object.values(RENT_LAYOUTS).map(l =>
+      '<button type="button" class="rentLayoutBtn' + (rentLayout === l.key ? " active" : "") + '" data-dlayout="' + l.key + '">' + l.label + "</button>"
+    ).join("");
+
+    heroAndMetricsHtml =
+      '<div class="priceHeroRow">' +
+        '<div><div class="priceHero">¥' + fmt(layoutRent) + '<small>/月 · ' + escapeHtml(lCfg.label) + '</small></div>' +
+        '<div class="rentLayoutBar">' + layoutBtns + '</div></div>' +
+        '<div class="deltaGroup">' +
+          '<span class="pill neutral">' + escapeHtml(lCfg.desc) + '</span>' +
+        "</div>" +
+      "</div>" +
+      '<div class="metricGrid4">' +
+        '<div class="mCell"><span>单平月租参考</span><b>¥' + unitRent + ' / ㎡·月</b><em>年租售比 ' + (useYld ? useYld.toFixed(2) + "%" : "--") + '</em></div>' +
+        '<div class="mCell"><span>押一付三首期</span><b>约 ¥' + fmt(layoutRent * 4) + '</b><em>含1月押金+3月房租</em></div>' +
+        '<div class="mCell"><span>舒适月薪安全线</span><b>≥ ¥' + fmt(safeSalary) + '/月</b><em>房租占收入 ≤30% 轻松线</em></div>' +
+        '<div class="mCell"><span>买同款月供对比</span><b>¥' + fmt(sameAreaMortgage) + '/月</b><em>' + (sameAreaMortgage > layoutRent ? "租房月省 ¥" + fmt(sameAreaMortgage - layoutRent) : "月供接近房租") + '</em></div>' +
+      "</div>";
+  } else if (r.price) {
+    const ptiNote = r.priceToIncome
+      ? (r.priceToIncome <= 8 ? "安家压力较小" : r.priceToIncome <= 14 ? "中等供房负担" : "购房门槛偏高")
+      : "家庭可支配收入口径";
+    heroAndMetricsHtml =
+      '<div class="priceHeroRow">' +
+        '<div class="priceHero">' + fmt(r.price) + '<small>元/㎡</small></div>' +
+        '<div class="deltaGroup">' +
+          '<span class="' + momCls + '">环比 ' + escapeHtml(r.mom || "--%") + '</span>' +
+          (r.yoy ? '<span class="' + yoyCls + '">同比 ' + escapeHtml(r.yoy) + '</span>' : '') +
+          (spreadTxt ? '<span class="pill neutral">' + spreadTxt + '</span>' : '') +
+        "</div>" +
+      "</div>" +
+      '<div class="metricGrid4">' +
+        '<div class="mCell"><span>二手挂牌均价</span><b>' + fmt(r.resalePrice || r.price) + ' 元/㎡</b><em>90㎡总价约 ' + ((r.price * 90) / 10000).toFixed(0) + '万</em></div>' +
+        '<div class="mCell"><span>新房' + (r.newPriceEstimated ? "估算" : "参考") + '均价</span><b>' + (r.newPrice ? fmt(r.newPrice) + " 元/㎡" : "暂无") + '</b><em>' + (r.newYoy ? "同比 " + escapeHtml(r.newYoy) : (r.newPriceEstimated ? "同城比例折算" : "在售新盘均价")) + '</em></div>' +
+        '<div class="mCell"><span>年租金回报率</span><b>' + (r.rentYield ? r.rentYield.toFixed(2) + "%" : "暂无") + '</b><em>' + (estMonthlyRent ? calcArea + "㎡月租约 ¥" + fmt(estMonthlyRent) : "住宅租售比") + '</em></div>' +
+        '<div class="mCell"><span>房价收入比 (90㎡)</span><b>' + (r.priceToIncome ? r.priceToIncome.toFixed(1) + " 年" : "暂无") + '</b><em>' + ptiNote + '</em></div>' +
+      "</div>";
+  }
+
   selected.innerHTML =
     '<div class="dossierHead">' +
       '<div><div class="dossierCrumb">' + escapeHtml(crumb || r.city) + '</div>' +
@@ -2232,20 +3771,7 @@ function renderDossier(r) {
       "</div>" +
     "</div>" +
     (r.price ? (
-      '<div class="priceHeroRow">' +
-        '<div class="priceHero">' + fmt(r.price) + '<small>元/㎡</small></div>' +
-        '<div class="deltaGroup">' +
-          '<span class="' + momCls + '">环比 ' + escapeHtml(r.mom || "--%") + '</span>' +
-          (r.yoy ? '<span class="' + yoyCls + '">同比 ' + escapeHtml(r.yoy) + '</span>' : '') +
-          (spreadTxt ? '<span class="pill neutral">' + spreadTxt + '</span>' : '') +
-        "</div>" +
-      "</div>" +
-      '<div class="metricGrid4">' +
-        '<div class="mCell"><span>二手挂牌均价</span><b>' + fmt(r.resalePrice || r.price) + ' 元/㎡</b><em>约 ' + fmtWan(r.resalePrice || r.price) + '/㎡</em></div>' +
-        '<div class="mCell"><span>新房' + (r.newPriceEstimated ? "估算" : "参考") + '均价</span><b>' + (r.newPrice ? fmt(r.newPrice) + " 元/㎡" : "暂无") + '</b><em>' + (r.newYoy ? "同比 " + escapeHtml(r.newYoy) : (r.newPriceEstimated ? "配对比例估算" : "在售新盘口径")) + '</em></div>' +
-        '<div class="mCell"><span>年租金回报率</span><b>' + (r.rentYield ? r.rentYield.toFixed(2) + "%" : "暂无") + '</b><em>' + (estMonthlyRent ? calcArea + "㎡月租约 ¥" + fmt(estMonthlyRent) : "住宅租售比") + '</em></div>' +
-        '<div class="mCell"><span>房价收入比 (90㎡)</span><b>' + (r.priceToIncome ? r.priceToIncome.toFixed(1) + " 年" : "暂无") + '</b><em>' + (r.priceToWage ? "双职工工资比 " + r.priceToWage.toFixed(1) + " 年" : "家庭可支配收入口径") + '</em></div>' +
-      "</div>" +
+      heroAndMetricsHtml +
       rangeHtml +
       '<div id="plateMount"></div>' +
       '<div id="adviceMount"></div>' +
@@ -2269,6 +3795,9 @@ function renderDossier(r) {
   document.getElementById("dossierFavBtn").onclick = () => toggleFav(r);
   document.getElementById("dossierCmpBtn").onclick = () => toggleCompare(r.id);
   document.getElementById("dossierShareBtn").onclick = () => copyShareLink(r);
+  selected.querySelectorAll("[data-dlayout]").forEach(btn => {
+    btn.onclick = () => { if (typeof setRentLayout === "function") setRentLayout(btn.dataset.dlayout); };
+  });
 
   const areaSel = document.getElementById("calcAreaSel");
   if (areaSel) {
@@ -2550,7 +4079,9 @@ function renderStreetPlateCapsules(vb, inverse, placedBoxes) {
 
       const sx = state.x + px * state.scale;
       const sy = state.y + py * state.scale;
-      const txt = `${pl.n} ${fmtWan(pl.p)}`;
+      const isRentCap = typeof userIntent !== "undefined" && userIntent === "rent" && typeof estMonthlyRentFromUnit === "function";
+      const capVal = isRentCap ? fmtRentShort(estMonthlyRentFromUnit(pl.p, effectiveRentYield(r))) : fmtWan(pl.p);
+      const txt = `${pl.n} ${capVal}`;
       const capW = Math.round(txt.length * 8.4 + 18);
       const halfW = (capW * (capScale * state.scale)) / 2 + 2;
       const halfH = (19 * (capScale * state.scale)) / 2 + 2;
@@ -2570,7 +4101,7 @@ function renderStreetPlateCapsules(vb, inverse, placedBoxes) {
 
       const dotColor = colorForResaleVal(pl.p);
       nodesHtml.push(
-        '<g class="plateNode' + (isSelectedPlate ? " active" : "") + '" data-dist-id="' + r.id + '" data-plate-idx="' + k + '" transform="translate(' + px.toFixed(2) + " " + py.toFixed(2) + ") scale(" + capScale.toFixed(5) + ')">' +
+        '<g class="plateNode' + (isSelectedPlate ? " active" : "") + '" data-dist-id="' + r.id + '" data-plate-idx="' + k + '" transform="translate(' + px.toFixed(2) + " " + py.toFixed(2) + ") scale(" + capScale.toFixed(6) + ')">' +
         '<rect class="plateBg" x="' + (-capW / 2).toFixed(1) + '" y="-9.5" width="' + capW + '" height="19" rx="5"></rect>' +
         '<circle cx="' + (-capW / 2 + 7.5).toFixed(1) + '" cy="0" r="3.2" fill="' + dotColor + '"></circle>' +
         '<text class="plateTxt" x="' + (-capW / 2 + 13.5).toFixed(1) + '" y="3.8">' + escapeHtml(txt) + "</text></g>"
@@ -2673,44 +4204,69 @@ function renderCommuteOverlay(hoverSvgPt = null) {
   if (!commuteRingLayer) return;
   if (!commuteActive || !commuteAnchor) {
     if (commuteRingLayer.innerHTML) commuteRingLayer.innerHTML = "";
+    if (commuteOriginLayer && commuteOriginLayer.innerHTML) commuteOriginLayer.innerHTML = "";
     return;
   }
-  const { lon, lat, x, y } = commuteAnchor;
+  const { lon, lat, x, y, name } = commuteAnchor;
   const inv = 1 / state.scale;
+  const tier = typeof getActiveCommuteTier === "function" ? getActiveCommuteTier() : { key: "metro", rings: [50, 30, 15] };
+  if (typeof syncCommuteTitleBadge === "function") syncCommuteTitleBadge(tier);
+  if (typeof lastResolvedCommuteTierKey !== "undefined" && lastResolvedCommuteTierKey !== tier.key) {
+    lastResolvedCommuteTierKey = tier.key;
+    clearTimeout(renderCommuteOverlay._panelTimer);
+    renderCommuteOverlay._panelTimer = setTimeout(() => updateCommutePanel(), 90);
+  }
   const pEast = projectLonLat(lon + 1 / (111.32 * Math.max(0.2, Math.cos((lat * Math.PI) / 180))), lat);
   const pNorth = projectLonLat(lon, lat + 1 / 111.12);
   const ux = Math.abs(pEast.x - x), uy = Math.abs(pNorth.y - y);
 
-  let html = [50, 30, 15].map(km => {
-    const rx = (ux * km).toFixed(2), ry = (uy * km).toFixed(2), ly = (y - uy * km).toFixed(2);
-    return '<ellipse class="commuteRing" cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" rx="' + rx + '" ry="' + ry + '"></ellipse>' +
-      '<text class="commuteRingLabel" x="' + x.toFixed(2) + '" y="' + ly + '" text-anchor="middle" transform="translate(' + x.toFixed(2) + " " + ly + ") scale(" + inv.toFixed(5) + ") translate(" + (-x).toFixed(2) + " " + (-Number(ly)).toFixed(2) + ')">' + km + "km</text>";
+  let html = tier.rings.map(km => {
+    const rx = (ux * km).toFixed(3), ry = (uy * km).toFixed(3), ly = (y - uy * km).toFixed(3);
+    const ringLbl = km < 1 ? `${Math.round(km * 1000)}m` : `${km}km`;
+    return '<ellipse class="commuteRing" cx="' + x.toFixed(3) + '" cy="' + y.toFixed(3) + '" rx="' + rx + '" ry="' + ry + '"></ellipse>' +
+      '<text class="commuteRingLabel" x="' + x.toFixed(3) + '" y="' + ly + '" text-anchor="middle" transform="translate(' + x.toFixed(3) + " " + ly + ") scale(" + inv.toFixed(6) + ") translate(" + (-x).toFixed(3) + " " + (-Number(ly)).toFixed(3) + ')">' + ringLbl + "</text>";
   }).join("");
-  html += '<circle cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="' + (5.5 * inv).toFixed(3) + '" fill="var(--brand)" stroke="#fff" stroke-width="' + (1.8 * inv).toFixed(3) + '"></circle>';
 
   if (hoverSvgPt) {
     const [hLon, hLat] = svgToLonLat(hoverSvgPt.x, hoverSvgPt.y);
     const distKm = haversineKm(lon, lat, hLon, hLat);
-    if (distKm >= 0.8 && distKm <= 280) {
-      const mx = (x + hoverSvgPt.x) / 2, my = (y + hoverSvgPt.y) / 2, txt = `${distKm.toFixed(1)} km`;
-      const bw = Math.round(txt.length * 7.2 + 14);
-      html += '<line class="rulerLine" x1="' + x.toFixed(2) + '" y1="' + y.toFixed(2) + '" x2="' + hoverSvgPt.x.toFixed(2) + '" y2="' + hoverSvgPt.y.toFixed(2) + '"></line>' +
-        '<g transform="translate(' + mx.toFixed(2) + " " + my.toFixed(2) + ") scale(" + inv.toFixed(5) + ')"><rect x="' + (-bw / 2).toFixed(1) + '" y="-9.5" width="' + bw + '" height="19" rx="9.5" fill="var(--ink)" opacity="0.9"></rect><text class="rulerBadge" x="0" y="4" text-anchor="middle">' + txt + "</text></g>";
+    if (distKm >= 0.03 && distKm <= 1200) {
+      const mx = (x + hoverSvgPt.x) / 2, my = (y + hoverSvgPt.y) / 2;
+      const txt = distKm < 1 ? `${Math.round(distKm * 1000)} m` : (distKm < 10 ? `${distKm.toFixed(2)} km` : `${distKm.toFixed(1)} km`);
+      const bw = Math.round(txt.length * 7.4 + 16);
+      html += '<line class="rulerLine" x1="' + x.toFixed(3) + '" y1="' + y.toFixed(3) + '" x2="' + hoverSvgPt.x.toFixed(3) + '" y2="' + hoverSvgPt.y.toFixed(3) + '"></line>' +
+        '<g transform="translate(' + mx.toFixed(3) + " " + my.toFixed(3) + ") scale(" + inv.toFixed(6) + ')"><rect x="' + (-bw / 2).toFixed(1) + '" y="-9.5" width="' + bw + '" height="19" rx="9.5" fill="var(--ink)" opacity="0.92"></rect><text class="rulerBadge" x="0" y="4" text-anchor="middle">' + txt + "</text></g>";
     }
   }
   commuteRingLayer.innerHTML = html;
+
+  if (commuteOriginLayer) {
+    const shortOrigin = String(name || "起点").slice(0, 8);
+    const tagTxt = `起点·${shortOrigin} (可拖)`;
+    const tagW = Math.round(tagTxt.length * 8.4 + 16);
+    commuteOriginLayer.innerHTML =
+      '<g class="commuteOriginPin" transform="translate(' + x.toFixed(3) + " " + y.toFixed(3) + ") scale(" + inv.toFixed(6) + ')">' +
+        '<circle cx="0" cy="0" r="14" fill="var(--brand)" opacity="0.22"></circle>' +
+        '<circle cx="0" cy="0" r="7.5" fill="var(--brand)" stroke="#ffffff" stroke-width="2.2"></circle>' +
+        '<circle cx="0" cy="0" r="2.6" fill="#ffffff"></circle>' +
+        '<rect x="' + (-tagW / 2).toFixed(1) + '" y="-30" width="' + tagW + '" height="19" rx="9.5" fill="#0f222d" stroke="#38bdf8" stroke-width="1.3"></rect>' +
+        '<text x="0" y="-16.8" text-anchor="middle" font-size="11" font-weight="800" fill="#ffffff" pointer-events="none">' + escapeHtml(tagTxt) + "</text>" +
+      "</g>";
+  }
 }
 
 function applyTransform(options = {}) {
   clampPan();
   viewport.setAttribute("transform", "translate(" + state.x + " " + state.y + ") scale(" + state.scale + ")");
+  if (commuteActive) renderCommuteOverlay();
   if (options.deferHeavy) return;
   updateDetailVisibility();
   if (!options.skipLoadDetails) maybeLoadDetails();
   updateVisibleLabels();
   if (typeof renderCommunityPins === "function") renderCommunityPins();
-  renderCommuteOverlay();
+  if (!commuteActive) renderCommuteOverlay();
   updateScaleBadge();
+  if (typeof updateNavBreadcrumb === "function") updateNavBreadcrumb();
   if (kpiViewportLinked) updateKPIs();
   if (tilesVisible || lastTileKey) requestTileUpdate(!!options.immediateTiles);
 }
@@ -2936,50 +4492,26 @@ function applyPreset(id, animate = true) {
 }
 
 function updateCommutePanel() {
-  if (!commuteActive || !commuteAnchor || !radiusAnchorInfo) return;
-  const { lon, lat, name, price, prov } = commuteAnchor;
-  if (prov) {
-    const src = detailSources.find(s => s.prov === prov);
-    if (src && !loadedDetailSources.has(src.id) && !loadingDetailSources.has(src.id)) {
-      loadDetailSource(src).then(() => updateCommutePanel());
-    }
+  if (typeof updateCommutePanelMultiScale === "function") {
+    updateCommutePanelMultiScale();
   }
-  const preferDistricts = loadedDetailSources.size > 0;
-  const ring15 = [], ring30 = [], ring50 = [], arbitrage = [];
-  for (let i = 0; i < places.length; i += 1) {
-    const r = places[i];
-    if (!r.price || (preferDistricts && r.dataLevel === "city" && coveredProvinces.has(r.province))) continue;
-    const [rLon, rLat] = svgToLonLat(r.cx, r.cy);
-    const dKm = haversineKm(lon, lat, rLon, rLat);
-    if (dKm <= 15) ring15.push(r.price);
-    else if (dKm <= 30) ring30.push(r.price);
-    else if (dKm <= 50) ring50.push(r.price);
-    if (price && dKm >= 4 && dKm <= 48 && r.price < price * 0.78 && !isInherited(r)) {
-      arbitrage.push({ r, dKm, savePct: Math.round((1 - r.price / price) * 100) });
-    }
-  }
-  radiusAnchorInfo.innerHTML = `圆心：<b>${escapeHtml(name)}</b>（${price ? fmt(price) + " 元/㎡" : "--"}）· 点击任意区域切换圆心，移鼠测距。`;
-  const m15 = medianNum(ring15), m30 = medianNum(ring30), m50 = medianNum(ring50);
-  radiusRingStats.innerHTML =
-    '<div class="ringStatCell"><span>0-15km 核心圈</span><b>' + (m15 ? fmtWan(m15) : "--") + '</b></div>' +
-    '<div class="ringStatCell"><span>15-30km 通勤圈</span><b>' + (m30 ? fmtWan(m30) : "--") + '</b></div>' +
-    '<div class="ringStatCell"><span>30-50km 外溢圈</span><b>' + (m50 ? fmtWan(m50) : "--") + '</b></div>';
-
-  arbitrage.sort((a, b) => b.savePct - a.savePct || a.dKm - b.dKm);
-  const topArb = arbitrage.slice(0, 5);
-  radiusArbitrage.innerHTML = topArb.length
-    ? '<div style="font-size:11.5px;font-weight:800;color:var(--ink-secondary);margin-top:2px">50km内跨区价格洼地推荐：</div>' +
-      topArb.map(item =>
-        '<div class="arbItem" data-id="' + item.r.id + '"><span><b>' + escapeHtml(item.r.city === item.r.name ? item.r.name : item.r.city.replace(/市$/, "") + "·" + item.r.name) + '</b> <small style="color:var(--ink-muted)">' + item.dKm.toFixed(1) + 'km</small></span><span><b style="color:var(--down)">省' + item.savePct + '%</b> · ' + fmtWan(item.r.price) + '</span></div>'
-      ).join("")
-    : '<div style="font-size:11.5px;color:var(--ink-muted)">点击高价核心区（如南山/天河/黄浦）可自动发现周边低价通勤洼地。</div>';
-  radiusArbitrage.querySelectorAll(".arbItem").forEach(el => { el.onclick = () => locateRegion(el.dataset.id); });
 }
 
 function setCommuteAnchorFromRegion(r) {
   if (!r) return;
   const [lon, lat] = svgToLonLat(r.cx, r.cy);
-  commuteAnchor = { id: r.id, lon, lat, x: r.cx, y: r.cy, prov: r.province, name: r.city === r.name ? r.name : `${r.city.replace(/市$/, "")} ${r.name}`, price: r.price };
+  commuteAnchor = {
+    id: r.id,
+    lon,
+    lat,
+    x: r.cx,
+    y: r.cy,
+    prov: r.province,
+    name: r.city === r.name ? r.name : `${r.city.replace(/市$/, "")} ${r.name}`,
+    price: r.price,
+    rentYield: typeof effectiveRentYield === "function" ? effectiveRentYield(r) : r.rentYield,
+    custom: false,
+  };
   renderCommuteOverlay();
   updateCommutePanel();
 }
@@ -2996,7 +4528,7 @@ function selectRegion(id, center = false, preservePlate = false) {
   setSelectedHighlight(r);
   setHoverHighlight(null);
   renderDossier(r);
-  if (commuteActive) setCommuteAnchorFromRegion(r);
+  if (commuteActive && !commuteAnchor) setCommuteAnchorFromRegion(r);
   if (center) {
     const targetScale = r.dataLevel === "city" ? Math.max(state.scale, 4.6) : Math.max(state.scale, 15.5);
     animateFocusContentPoint(r.cx, r.cy, targetScale);
@@ -3252,8 +4784,18 @@ function beginPinch() {
   pinch = { distance: Math.max(1, pointerDistance(points[0], points[1])), scale: state.scale, content: svgToContent(anchor) };
 }
 function endPointer(event) {
+  if (typeof draggingCommutePin !== "undefined" && draggingCommutePin) {
+    draggingCommutePin = false;
+    svg.classList.remove("draggingPin");
+    if (activePointers.has(event.pointerId)) {
+      activePointers.delete(event.pointerId);
+      try { svg.releasePointerCapture(event.pointerId); } catch (_) {}
+    }
+    updateCommutePanel();
+    return;
+  }
   const candidate = tapCandidate && tapCandidate.pointerId === event.pointerId ? tapCandidate : null;
-  const isTap = !!(candidate && (candidate.id || candidate.plateDistId || candidate.xqId) && activePointers.size === 1 && !candidate.moved && Math.hypot(event.clientX - candidate.clientX, event.clientY - candidate.clientY) <= 7);
+  const isTap = !!(candidate && activePointers.size === 1 && !candidate.moved && Math.hypot(event.clientX - candidate.clientX, event.clientY - candidate.clientY) <= 7);
   if (activePointers.has(event.pointerId)) {
     activePointers.delete(event.pointerId);
     try { svg.releasePointerCapture(event.pointerId); } catch (_) {}
@@ -3268,6 +4810,19 @@ function endPointer(event) {
   if (candidate) {
     tapCandidate = null;
     if (isTap) {
+      if (commuteActive && typeof commuteFreeClick !== "undefined" && commuteFreeClick && typeof setCommuteAnchorFreeContentPt === "function") {
+        const cpt = svgToContent(clientToSvg(event.clientX, event.clientY));
+        const hitR = candidate.id ? placeById.get(candidate.id) : (candidate.plateDistId ? placeById.get(candidate.plateDistId) : null);
+        let customLbl = "";
+        if (candidate.plateDistId && streetPlatesCache) {
+          const pl = streetPlatesCache.platesByDistrict?.[hitR?.sk]?.plates?.[candidate.plateIdx];
+          if (pl) customLbl = `${hitR.name.replace(/[区县市]$/, "")}·${pl.n}`;
+        } else if (candidate.xqId && typeof activePlateCommunities !== "undefined") {
+          const xq = activePlateCommunities.find(x => x.id === candidate.xqId);
+          if (xq) customLbl = xq.n;
+        }
+        setCommuteAnchorFreeContentPt(cpt.x, cpt.y, customLbl, hitR, true);
+      }
       if (candidate.xqId && typeof onTapCommunityPin === "function") onTapCommunityPin(candidate.xqId);
       else if (candidate.plateDistId) selectStreetPlate(candidate.plateDistId, candidate.plateIdx, false);
       else if (candidate.id) selectRegion(candidate.id, false);
@@ -3288,14 +4843,18 @@ if (streetPlateLayer) {
     tooltip.style.display = "block";
     tooltip.style.left = Math.min(window.innerWidth - 280, event.clientX + pad) + "px";
     tooltip.style.top = Math.min(window.innerHeight - 130, event.clientY + pad) + "px";
-    const tipKey = `plate:${r.id}:${pl.n}`;
+    const tipKey = `plate:${r.id}:${pl.n}:${typeof userIntent !== "undefined" ? userIntent : "buy"}:${typeof rentLayout !== "undefined" ? rentLayout : "two"}`;
     if (tooltipPlaceId !== tipKey) {
       tooltipPlaceId = tipKey;
+      const isRentTip = typeof userIntent !== "undefined" && userIntent === "rent" && typeof estMonthlyRentFromUnit === "function";
+      const mainLine = isRentTip
+        ? `${RENT_LAYOUTS[rentLayout].label}月租：约 ¥${fmt(estMonthlyRentFromUnit(pl.p, effectiveRentYield(r)))} / 月`
+        : `街道/板块均价：${fmt(pl.p)} 元/㎡`;
       tooltip.innerHTML =
         "<strong>" + escapeHtml(`${r.city.replace(/市$/, "")} ${r.name} · ${pl.n}`) + "</strong>" +
-        '<div class="tipMain">街道/板块均价：' + fmt(pl.p) + " 元/㎡</div>" +
-        "<span>所属区均价：" + (r.price ? fmt(r.price) + " 元/㎡" : "--") + (pl.m ? " · 环比 " + escapeHtml(pl.m) : "") + "</span>" +
-        '<span style="color:#94b0c2;font-size:11px">' + (pl.rp ? `同城标尺校准后（原值 ${fmt(pl.rp)} 元/㎡）` : "街道/商圈参考口径") + " · 点击查看详情</span>";
+        '<div class="tipMain">' + escapeHtml(mainLine) + "</div>" +
+        "<span>二手参考：" + fmt(pl.p) + " 元/㎡ · 所属区：" + (r.price ? fmt(r.price) + " 元/㎡" : "--") + "</span>" +
+        '<span style="color:#94b0c2;font-size:11px">点击查看板块代表小区与' + (isRentTip ? "看租建议" : "置业诊断") + "</span>";
     }
   });
   streetPlateLayer.addEventListener("mouseleave", hideTip);
@@ -3310,8 +4869,18 @@ svg.addEventListener("wheel", event => { event.preventDefault(); cancelMoveAnima
 svg.addEventListener("dblclick", event => { event.preventDefault(); cancelMoveAnimation(); invalidateViewMetrics(); zoom(1.65, event.clientX, event.clientY); });
 svg.addEventListener("pointerdown", event => {
   if (event.pointerType === "mouse" && event.button !== 0) return;
-  event.preventDefault(); cancelMoveAnimation(); invalidateViewMetrics(); setMoving(true); hideTip();
+  event.preventDefault(); cancelMoveAnimation(); invalidateViewMetrics(); hideTip();
   if (svg.setPointerCapture) svg.setPointerCapture(event.pointerId);
+  const originPin = event.target.closest ? event.target.closest(".commuteOriginPin") : null;
+  if (originPin && commuteActive && commuteAnchor) {
+    draggingCommutePin = true;
+    dragging = false;
+    tapCandidate = null;
+    activePointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+    svg.classList.add("draggingPin");
+    return;
+  }
+  setMoving(true);
   const xqPin = event.target.closest ? event.target.closest(".xqPinNode") : null;
   const plateNode = !xqPin && event.target.closest ? event.target.closest(".plateNode") : null;
   const target = !xqPin && !plateNode && event.target.closest ? event.target.closest(".region") : null;
@@ -3321,7 +4890,9 @@ svg.addEventListener("pointerdown", event => {
       ? { plateDistId: plateNode.dataset.distId, plateIdx: Number(plateNode.dataset.plateIdx), pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, moved: false }
       : target
         ? { id: target.id, pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, moved: false }
-        : null;
+        : (commuteActive && typeof commuteFreeClick !== "undefined" && commuteFreeClick
+            ? { freeClickOnly: true, pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, moved: false }
+            : null);
   activePointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
   if (activePointers.size >= 2) { dragging = false; beginPinch(); }
   else { dragging = true; last = { clientX: event.clientX, clientY: event.clientY }; }
@@ -3329,6 +4900,12 @@ svg.addEventListener("pointerdown", event => {
 });
 window.addEventListener("pointermove", event => {
   if (activePointers.has(event.pointerId)) activePointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+  if (typeof draggingCommutePin !== "undefined" && draggingCommutePin && commuteActive) {
+    event.preventDefault();
+    const cpt = svgToContent(clientToSvg(event.clientX, event.clientY));
+    setCommuteAnchorFreeContentPt(cpt.x, cpt.y, "", null, false);
+    return;
+  }
   if (tapCandidate && tapCandidate.pointerId === event.pointerId && Math.hypot(event.clientX - tapCandidate.clientX, event.clientY - tapCandidate.clientY) > 7) tapCandidate.moved = true;
   if (activePointers.size >= 2) {
     event.preventDefault(); tapCandidate = null;
@@ -3469,14 +5046,30 @@ budgetAreaInput.oninput = () => { budgetActive = true; smartActive = false; docu
 // Commute Radius Ring Controls
 if (toggleRadiusButton && radiusPopover) {
   toggleRadiusButton.onclick = () => {
+    if (commuteActive && !radiusPopover.classList.contains("open")) {
+      closeAllPopovers(radiusPopover);
+      radiusPopover.classList.add("open");
+      return;
+    }
     closeAllPopovers(radiusPopover);
     commuteActive = !commuteActive;
     toggleRadiusButton.classList.toggle("active", commuteActive);
     radiusPopover.classList.toggle("open", commuteActive);
+    if (typeof window.__syncCommuteFreeCursor === "function") window.__syncCommuteFreeCursor();
     if (commuteActive) {
-      const seed = (activeId && placeById.get(activeId)) || places.find(p => p.name === "南山区" || p.name.includes("深圳"));
-      if (seed) setCommuteAnchorFromRegion(seed);
-      showToast("已开启都市通勤圈测距 · 点击任意区域切换圆心");
+      if (!commuteAnchor) {
+        if (state.scale >= 6.5) {
+          const centerCpt = svgToContent(svgCenterPoint());
+          setCommuteAnchorFreeContentPt(centerCpt.x, centerCpt.y, "", null, true);
+        } else {
+          const seed = (activeId && placeById.get(activeId)) || places.find(p => p.name === "南山区" || p.name.includes("深圳"));
+          if (seed) setCommuteAnchorFromRegion(seed);
+        }
+      } else {
+        renderCommuteOverlay();
+        updateCommutePanel();
+      }
+      showToast("通勤圈已开启 · 可点击地图任意处设起点、拖拽起点图钉，放大自动细化至1km圈");
     } else {
       renderCommuteOverlay(null);
     }
@@ -3485,6 +5078,7 @@ if (toggleRadiusButton && radiusPopover) {
     commuteActive = false;
     toggleRadiusButton.classList.remove("active");
     radiusPopover.classList.remove("open");
+    if (typeof window.__syncCommuteFreeCursor === "function") window.__syncCommuteFreeCursor();
     renderCommuteOverlay(null);
   };
 }
@@ -3571,6 +5165,7 @@ document.getElementById("scsInset").onclick = () => {
 document.querySelectorAll(".metricTab").forEach(tab => {
   tab.onclick = () => {
     metricMode = tab.dataset.metric;
+    if (metricMode === "estRent" && typeof syncEstRentMetricConfig === "function") syncEstRentMetricConfig();
     activeBin = -1;
     document.querySelectorAll(".metricTab").forEach(t => {
       const on = t === tab;
@@ -3659,6 +5254,7 @@ refreshLegendUI();
 renderEmptyDossier();
 focusLonLat(initialCenter[0], initialCenter[1], initialScale, false);
 renderRows("");
+if (typeof initMatchmakerUX === "function") initMatchmakerUX();
 
 const params = new URLSearchParams(location.search);
 const urlMetric = params.get("metric");

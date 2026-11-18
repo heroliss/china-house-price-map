@@ -612,8 +612,21 @@ function createInteractiveMap(config) {
   .profileBtn.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
   .profileBtn small { display: block; font-size: 11px; font-weight: 600; color: var(--ink-muted); margin-top: 2px; }
 
-  .radiusPanel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 12; width: 336px; padding: 12px 14px; display: none; flex-direction: column; gap: 9px; }
+  .radiusPanel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 12; width: 372px; padding: 12px 14px; display: none; flex-direction: column; gap: 9px; }
   .radiusPanel.open { display: flex; }
+  .poiSearchRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+  .poiCandList { display: flex; flex-direction: column; gap: 4px; background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 8px; padding: 8px; max-height: 136px; overflow-y: auto; }
+  .poiCandItem { border: 0; background: var(--bg-panel); border-radius: 6px; padding: 6px 8px; text-align: left; font-size: 12px; color: var(--ink); cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+  .poiCandItem:hover { background: var(--brand-soft); color: var(--brand-ink); }
+  .poiCandItem small { font-size: 11px; color: var(--ink-muted); }
+  .commuteActionRow { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .commuteActionRow .miniBtn { flex: 1 1 auto; justify-content: center; height: 28px; font-size: 12px; }
+  .ringModeBar { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+  .ringModeBtn { flex: 1 1 auto; border: 1px solid var(--line); background: var(--bg-subtle); color: var(--ink-secondary); height: 26px; padding: 0 6px; border-radius: 6px; font-size: 11.5px; font-weight: 750; cursor: pointer; white-space: nowrap; }
+  .ringModeBtn:hover, .ringModeBtn.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); font-weight: 800; }
+  .commuteOriginPin { cursor: grab; }
+  .commuteOriginPin:active, svg.draggingPin .commuteOriginPin { cursor: grabbing; }
+  svg.commuteFreeClick { cursor: crosshair; }
   .ringStatGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
   .ringStatCell { background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 7px; padding: 6px 7px; text-align: center; }
   .ringStatCell span { display: block; font-size: 11px; color: var(--ink-muted); }
@@ -805,6 +818,62 @@ function createInteractiveMap(config) {
   .aiGrid2 { display: grid; grid-template-columns: 1.3fr 1fr; gap: 6px; }
   .aiOutput { background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 7px; padding: 9px 10px; font-size: 12px; line-height: 1.6; color: var(--ink); white-space: pre-wrap; max-height: 280px; overflow-y: auto; }
 
+  /* Dual-Persona Mode Bar & Beginner 3-Step Matchmaker */
+  .intentBar { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; padding: 5px; background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 10px; align-items: center; }
+  .intentBtn { border: 0; background: transparent; color: var(--ink-secondary); height: 32px; border-radius: 7px; font-size: 12.5px; font-weight: 800; cursor: pointer; transition: background 0.15s, color 0.15s; }
+  .intentBtn:hover { color: var(--ink); }
+  .intentBtn.active { background: var(--bg-panel); color: var(--brand-ink); box-shadow: 0 1px 3px rgba(15, 34, 45, 0.08); }
+  .intentActionBtn { border: 1px solid var(--brand); background: var(--brand-soft); color: var(--brand-ink); height: 32px; padding: 0 12px; border-radius: 7px; font-size: 12.5px; font-weight: 800; cursor: pointer; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+  .intentActionBtn:hover, .intentActionBtn.active { background: var(--brand); color: #ffffff; }
+
+  .mmBox { background: var(--bg-panel); border: 1px solid var(--brand); border-radius: 11px; padding: 11px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .mmHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+  .mmHead strong { display: block; font-size: 14px; font-weight: 800; color: var(--ink); }
+  .mmSub { display: block; font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+  .mmStep { display: flex; flex-direction: column; gap: 6px; }
+  .mmStepLabel { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; font-weight: 750; color: var(--ink); }
+  .mmStepLabel b { font-size: 12px; font-weight: 800; color: var(--brand-ink); }
+  .mmWorkRow { display: grid; grid-template-columns: minmax(0, 1fr) 114px; gap: 6px; }
+  .mmSelect { height: 32px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg-subtle); padding: 0 6px; font-size: 12px; font-weight: 700; color: var(--ink); }
+  .mmSpotRow { display: flex; flex-wrap: wrap; gap: 5px; }
+  .mmSpotChip { border: 1px solid var(--line); background: var(--bg-subtle); color: var(--ink-secondary); border-radius: 999px; height: 25px; padding: 0 9px; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .mmSpotChip:hover, .mmSpotChip.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
+  .mmRange { width: 100%; accent-color: var(--brand); cursor: pointer; }
+  .mmPillRow { display: flex; flex-wrap: wrap; gap: 5px; }
+  .mmOptBtn { flex: 1 1 auto; border: 1px solid var(--line); background: var(--bg-subtle); color: var(--ink-secondary); height: 28px; padding: 0 8px; border-radius: 7px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+  .mmOptBtn:hover, .mmOptBtn.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); font-weight: 800; }
+  .mmSubmitBtn { border: 0; background: var(--brand); color: #ffffff; height: 35px; border-radius: 8px; font-size: 13px; font-weight: 800; cursor: pointer; transition: opacity 0.15s; }
+  .mmSubmitBtn:hover { opacity: 0.92; }
+  .mmSubmitBtn:disabled { opacity: 0.6; cursor: wait; }
+  .mmResHead { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; font-weight: 800; color: var(--ink); padding-top: 6px; border-top: 1px solid var(--line); }
+  .mmResHead small { font-size: 11.5px; font-weight: 600; color: var(--ink-muted); }
+  .mmResList { display: flex; flex-direction: column; gap: 6px; max-height: 256px; overflow-y: auto; padding-right: 2px; }
+  .mmResCard { border: 1px solid var(--line); background: var(--bg-subtle); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; cursor: pointer; transition: border-color 0.14s, background 0.14s; }
+  .mmResCard:hover { border-color: var(--brand); background: var(--brand-soft); }
+  .mmResTop { display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 13px; }
+  .mmResTop small { font-size: 11.5px; color: var(--ink-muted); font-weight: 600; margin-left: 4px; }
+  .mmScoreBadge { background: var(--brand-soft); color: var(--brand-ink); border: 1px solid var(--brand); border-radius: 999px; padding: 2px 7px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+  .mmResMid { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; }
+  .mmResMid b { color: var(--ink); font-weight: 800; font-size: 13px; }
+  .mmResMid span { color: var(--ink-secondary); font-size: 12px; }
+  .mmResFoot { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-muted); }
+  .mmGoTxt { color: var(--brand-ink); font-weight: 800; white-space: nowrap; }
+  .mmEmpty { font-size: 12.5px; color: var(--ink-muted); padding: 8px; background: var(--bg-subtle); border-radius: 7px; }
+
+  /* Breadcrumb, Legend Plain-Language Guide & Rent Layout Switcher */
+  .navBreadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; padding: 6px 10px; font-size: 12px; max-width: 380px; }
+  .crumbBtn { border: 0; background: none; color: var(--brand-ink); font-size: 12px; font-weight: 750; padding: 1px 4px; border-radius: 4px; cursor: pointer; }
+  .crumbBtn:hover { background: var(--brand-soft); }
+  .crumbSep { color: var(--ink-muted); font-size: 12px; user-select: none; }
+  .crumbCur { color: var(--ink); font-weight: 800; padding: 1px 2px; }
+  .legendExplain { font-size: 12px; color: var(--ink-secondary); line-height: 1.45; margin: 2px 0 4px; }
+  .rentLayoutBar { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .rentLayoutBtn { border: 1px solid var(--line); background: var(--bg-panel); color: var(--ink-secondary); height: 26px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 750; cursor: pointer; }
+  .rentLayoutBtn:hover, .rentLayoutBtn.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); font-weight: 800; }
+  .popDivider { height: 1px; background: var(--line); margin: 4px 0; }
+  .popActionsGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .popActionsGrid .toolBtn { width: 100%; justify-content: center; height: 31px; font-size: 12px; border: 1px solid var(--line); }
+
   /* Filter & Ranking Controls */
   .filterBlock { display: flex; flex-direction: column; gap: 8px; }
   .searchRow { display: grid; grid-template-columns: minmax(0, 1fr) 126px; gap: 7px; }
@@ -932,21 +1001,24 @@ function createInteractiveMap(config) {
         <button class="toolBtn" id="zoomOut" title="缩小地图 (-)" aria-label="缩小地图"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
         <button class="toolBtn" id="reset" title="回到初始全国视角 (R)" aria-label="重置视图"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg><span class="btnTxt">重置</span></button>
         <div class="toolSep"></div>
-        <button class="toolBtn active" id="toggleLabels" title="显示或隐藏地图标注" aria-label="切换标注"><svg viewBox="0 0 24 24"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg><span class="btnTxt">标注</span></button>
-        <button class="toolBtn active" id="toggleFineMode" title="开启或关闭区县及核心街道/商圈板块细化下钻" aria-label="区县与街道细化"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="btnTxt">街道细化</span></button>
-        <button class="toolBtn" id="toggleTiles" title="叠加高德真实道路与地形底图" aria-label="真实底图"><svg viewBox="0 0 24 24"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg><span class="btnTxt">底图</span></button>
+        <button class="toolBtn" id="toggleTiles" title="叠加高德真实道路与地铁生活底图" aria-label="真实底图"><svg viewBox="0 0 24 24"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg><span class="btnTxt">底图</span></button>
+        <button class="toolBtn" id="toggleRadius" title="15/30/50km 都市通勤圈与跨区低价洼地测距" aria-label="通勤圈测距"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg><span class="btnTxt">通勤圈</span></button>
         <button class="toolBtn" id="toggleTimeline" title="近12个月房价动态回放时光机" aria-label="时光轴回放"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg><span class="btnTxt">时光轴</span></button>
-        <button class="toolBtn" id="toggleRadius" title="15/30/50km 都市通勤圈与跨区价格洼地测距" aria-label="通勤圈测距"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg><span class="btnTxt">通勤圈</span></button>
-        <button class="toolBtn" id="toggleBudget" title="购房总预算与多因子智能选房评分" aria-label="智能选房"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 12 16.5 7.5"/><circle cx="12" cy="12" r="2"/></svg><span class="btnTxt">智能选房</span></button>
-        <button class="toolBtn" id="toggleDisplay" title="字号与透明度设置" aria-label="显示设置"><svg viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="18" y1="16" x2="22" y2="16"/></svg></button>
-        <button class="toolBtn" id="exportPng" title="导出当前地图高清PNG图片" aria-label="导出图片"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+        <button class="toolBtn" id="toggleBudget" title="按预算或置业模型在地图高亮筛选区域" aria-label="预算筛选"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 12 16.5 7.5"/><circle cx="12" cy="12" r="2"/></svg><span class="btnTxt">筛选</span></button>
+        <button class="toolBtn" id="toggleDisplay" title="显示设置、标注开关与导出高清图片" aria-label="显示与导出"><svg viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="18" y1="16" x2="22" y2="16"/></svg><span class="btnTxt">更多</span></button>
         <button class="toolBtn" id="toggleTheme" title="切换深色/浅色主题" aria-label="切换主题"><svg id="themeIcon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
         <button class="toolBtn" id="toggleSidebar" title="收起或展开右侧数据工作台" aria-label="收放侧栏"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg></button>
       </div>
 
       <div id="displayPopover" class="popoverPanel hudCard">
-        <div class="popRow"><label for="labelScale">标注大小</label><input id="labelScale" type="range" min="60" max="190" value="100"><span id="labelScaleValue">100%</span></div>
-        <div class="popRow"><label for="overlayOpacity">图层不透明</label><input id="overlayOpacity" type="range" min="15" max="100" value="${config.overlayOpacity ?? 75}"><span id="overlayOpacityValue">${config.overlayOpacity ?? 75}%</span></div>
+        <div class="popRow"><label for="labelScale">标注字号</label><input id="labelScale" type="range" min="60" max="190" value="100"><span id="labelScaleValue">100%</span></div>
+        <div class="popRow"><label for="overlayOpacity">色块不透明</label><input id="overlayOpacity" type="range" min="15" max="100" value="${config.overlayOpacity ?? 75}"><span id="overlayOpacityValue">${config.overlayOpacity ?? 75}%</span></div>
+        <div class="popDivider"></div>
+        <div class="popActionsGrid">
+          <button class="toolBtn active" id="toggleLabels" title="显示或隐藏地图文字标注" aria-label="切换标注">标注显示</button>
+          <button class="toolBtn active" id="toggleFineMode" title="放大时自动展开区县、街道与小区" aria-label="自动下钻细化">街道细化</button>
+          <button class="toolBtn" id="exportPng" title="导出当前地图高清PNG图片" aria-label="导出高清图">导出图片</button>
+        </div>
       </div>
 
       <div id="budgetPopover" class="budgetPanel hudCard">
@@ -970,8 +1042,24 @@ function createInteractiveMap(config) {
       </div>
 
       <div id="radiusPopover" class="radiusPanel hudCard">
-        <div class="budgetHead"><span>都市通勤圈与测距仪</span><button id="closeRadius" class="linkBtn" type="button">关闭</button></div>
-        <div id="radiusAnchorInfo" class="budgetSummary">点击地图任意区域即可设为通勤圆心，自动测算 15/30/50km 房价梯度与价格洼地。</div>
+        <div class="budgetHead"><span id="radiusTitleSpan">都市通勤圈 · 任意点测距</span><button id="closeRadius" class="linkBtn" type="button">关闭</button></div>
+        <div class="poiSearchRow">
+          <input id="commutePoiInput" class="aiInput" type="text" placeholder="搜写字楼/地铁站/地名设圆心 (如 深圳湾科技生态园)">
+          <button id="commutePoiBtn" type="button" class="miniBtn active">设圆心</button>
+        </div>
+        <div id="commutePoiCandidates" class="poiCandList" style="display:none"></div>
+        <div class="commuteActionRow">
+          <button type="button" id="toggleFreeClickBtn" class="miniBtn active" title="开启后点击地图任意位置即可设为圆心，也可直接拖拽地图上的起点图钉">点图自由设圆心: 开</button>
+          <button type="button" id="commuteMyLocBtn" class="miniBtn" title="获取当前定位设为通勤圆心">定位当前处</button>
+        </div>
+        <div class="ringModeBar" role="group" aria-label="通勤圈半径档位">
+          <button type="button" class="ringModeBtn active" data-rmode="auto" title="随地图放大自动缩小通勤圈半径">自动</button>
+          <button type="button" class="ringModeBtn" data-rmode="micro">1/2/3km</button>
+          <button type="button" class="ringModeBtn" data-rmode="street">2/5/10km</button>
+          <button type="button" class="ringModeBtn" data-rmode="urban">5/10/20km</button>
+          <button type="button" class="ringModeBtn" data-rmode="metro">15/30/50km</button>
+        </div>
+        <div id="radiusAnchorInfo" class="budgetSummary">可直接点击地图任意位置、拖拽地图起点图钉或输入大厦名称设为圆心；放大地图自动切换至 1–10km 精细圈。</div>
         <div id="radiusRingStats" class="ringStatGrid"></div>
         <div id="radiusArbitrage" class="arbList"></div>
       </div>
@@ -979,13 +1067,14 @@ function createInteractiveMap(config) {
     </div>
     <div class="hudSubStack">
       <div class="metricTabs hudCard" role="tablist" aria-label="地图指标切换">
-        <button class="metricTab active" role="tab" aria-selected="true" data-metric="resale">二手挂牌</button>
-        <button class="metricTab" role="tab" aria-selected="false" data-metric="newPrice">新房均价</button>
-        <button class="metricTab" role="tab" aria-selected="false" data-metric="yoy">同比涨跌</button>
-        <button class="metricTab" role="tab" aria-selected="false" data-metric="rentYield">租金回报</button>
-        <button class="metricTab" role="tab" aria-selected="false" data-metric="priceToIncome">房价收入比</button>
-        <button class="metricTab" role="tab" aria-selected="false" data-metric="drawdown">峰值回撤</button>
-        <button class="metricTab" role="tab" aria-selected="false" data-metric="spread">一二手价差</button>
+        <button class="metricTab active" role="tab" aria-selected="true" data-metric="resale" title="各地二手商品住宅挂牌参考均价">二手挂牌</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="newPrice" title="各地在售新建住宅参考均价">新房均价</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="estRent" title="按所选租住户型估算整月房租（元/月）">月租参考</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="yoy" title="与去年同期相比的房价涨跌幅">同比涨跌</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="rentYield" title="年租金除以房价的现金流回报率">租金回报</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="priceToIncome" title="当地普通家庭买一套90㎡住宅所需年数">房价收入比</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="drawdown" title="当前房价相比近十年最高点的回调幅度">峰值回撤</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="spread" title="新房相比同区二手房的倒挂或溢价幅度">一二手价差</button>
       </div>
       ${config.showPresetButtons === false ? "" : `<div class="presetBar" aria-label="重点城市群快速定位">${(config.viewPresets || []).map(preset => `<button class="presetButton" data-preset="${esc(preset.id)}">${esc(preset.shortLabel || preset.label)}</button>`).join("")}</div>`}
     </div>
@@ -1012,6 +1101,7 @@ function createInteractiveMap(config) {
         <g id="dynamicLabels"></g>
         <g id="streetPlateLayer"></g>
         <g id="communityPinLayer"></g>
+        <g id="commuteOriginLayer"></g>
       </g>
     </svg>
 
@@ -1020,6 +1110,7 @@ function createInteractiveMap(config) {
         <span id="legendTitle" class="legendTitle">二手住宅挂牌均价（万/㎡）</span>
         <span class="legendHint"><span id="legendFilterTip">点击色块筛选区间</span><button id="clearBinFilter" class="linkBtn" style="display:none" type="button">重置区间</button></span>
       </div>
+      <div id="legendExplain" class="legendExplain">颜色越暖代表二手房价越高；滚动滚轮放大地图会自动展开区县、街道与代表小区。</div>
       <div id="legendDistBar" class="legendDistBar" title="当前各色阶样本占比分布"></div>
       <div id="swatches" class="swatches">${colors.map((c, i) => `<button type="button" class="swatchBtn" data-bin="${i}" style="background:${c}" aria-label="筛选区间 ${legendLabel(i, breaks, colors)}"></button>`).join("")}</div>
       <div id="legendLabels" class="legendLabels">${colors.map((_, i) => `<span>${legendLabel(i, breaks, colors)}</span>`).join("")}</div>
@@ -1036,6 +1127,7 @@ function createInteractiveMap(config) {
         </svg>
         <span class="scsLabel">南海诸岛</span>
       </div>
+      <nav id="navBreadcrumb" class="navBreadcrumb hudCard" aria-label="地图层级返回导航"><span class="crumbCur">全国总览</span></nav>
       <div id="scaleBadge" class="scaleBadge hudCard">城市级视图 · 放大自动加载区县</div>
       <div class="tileAttribution hudCard">底图 © 高德地图</div>
     </div>
@@ -1049,8 +1141,15 @@ function createInteractiveMap(config) {
     </div>
   </section>
 
-  <aside class="side" aria-label="区域房价数据与分析">
+  <aside class="side" aria-label="区域房价与租房决策工作台">
     <div class="sideScroll">
+      <div class="intentBar" role="tablist" aria-label="买房或租房模式切换">
+        <button type="button" class="intentBtn active" role="tab" aria-selected="true" data-intent="buy">买房置业</button>
+        <button type="button" class="intentBtn" role="tab" aria-selected="false" data-intent="rent">租房安居</button>
+        <button type="button" class="intentActionBtn" id="openMatchmakerBtn" title="填写预算与上班地点，自动筛选最适合您的片区">帮我找房</button>
+      </div>
+      <div id="matchmakerMount"></div>
+
       <div class="kpiWrap">
         <div class="kpiHeadRow">
           <span id="kpiScopeTitle">全国城市基准统计</span>
@@ -1122,9 +1221,10 @@ const initialCenter = ${JSON.stringify(initialCenter)};
 const initialScale = ${Number(initialScale)};
 const projection = ${JSON.stringify({ minX: projection.minX, minY: projection.minY, maxX: projection.maxX, maxY: projection.maxY, scale: projection.scale, ox: projection.ox, oy: projection.oy })};
 const mapBounds = ${JSON.stringify(projection.projectedMapBounds)};
-const minScale = 0.72, maxScale = ${Number(config.maxScale || 180)}, maxDetailLoadsPerPass = ${Number(config.maxDetailLoadsPerPass || 4)};
+const minScale = 0.72, maxScale = ${Number(config.maxScale || 2400)}, maxDetailLoadsPerPass = ${Number(config.maxDetailLoadsPerPass || 4)};
 
 ${fs.readFileSync(path.join(__dirname, "client_xiaoqu_advisor.js"), "utf8")}
+${fs.readFileSync(path.join(__dirname, "client_matchmaker_ux.js"), "utf8")}
 ${fs.readFileSync(path.join(__dirname, "client_map_app.js"), "utf8")}
 </script>
 </body>
