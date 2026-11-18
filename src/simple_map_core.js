@@ -1,8 +1,9 @@
 const fs = require("fs");
 const path = require("path");
+const { buildTopologicalLayerPaths } = require("./topo_simplify");
 
-const DEFAULT_COLORS = ["#2b6cb0", "#4fa3c8", "#8fd0d0", "#f2e6a7", "#f3a05f", "#d95845", "#9e1f2f", "#64152d"];
-const DEFAULT_BREAKS = [0, 8000, 12000, 18000, 30000, 50000, 80000, 120000, 180000];
+const DEFAULT_COLORS = ["#2c5e8a", "#3f87b5", "#6bc0c4", "#bfe3b4", "#f5cf86", "#eb8a4c", "#c8413a", "#781530"];
+const DEFAULT_BREAKS = [0, 5500, 8000, 12000, 18000, 30000, 55000, 90000, 200000];
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
@@ -13,7 +14,9 @@ function fmt(value) {
 }
 
 function fmtWanNumber(value) {
-  return Number((Number(value) / 10000).toFixed(1)).toLocaleString("zh-CN", { maximumFractionDigits: 1 });
+  const w = Number(value) / 10000;
+  const digits = w < 1 ? 2 : 1;
+  return Number(w.toFixed(digits)).toLocaleString("zh-CN", { maximumFractionDigits: digits });
 }
 
 function fmtWanLabel(value) {
@@ -66,8 +69,9 @@ function walkCoords(geom, fn) {
 }
 
 function mercator([lon, lat]) {
-  const rad = lat * Math.PI / 180;
-  return [lon, Math.log(Math.tan(Math.PI / 4 + rad / 2)) * 180 / Math.PI];
+  const clampedLat = Math.max(-85, Math.min(85, lat));
+  const rad = (clampedLat * Math.PI) / 180;
+  return [lon, (Math.log(Math.tan(Math.PI / 4 + rad / 2)) * 180) / Math.PI];
 }
 
 function buildProjection(features, mapBox) {
@@ -95,16 +99,30 @@ function buildProjection(features, mapBox) {
   return { minX, minY, maxX, maxY, scale, ox, oy, project, projectedMapBounds };
 }
 
-function geomToPath(geom, project) {
+function fmtNum(n, decimals = 1) {
+  const s = n.toFixed(decimals);
+  return decimals > 0 ? s.replace(/\.?0+$/, "") : s;
+}
+
+function pointsToCompactSvgRing(points, decimals = 1) {
+  if (!points || points.length < 3) return "";
+  let d = "";
+  for (let i = 0; i < points.length; i += 1) {
+    const x = fmtNum(points[i][0], decimals);
+    const y = fmtNum(points[i][1], decimals);
+    const sep = y.startsWith("-") ? "" : " ";
+    d += `${i === 0 ? "M" : "L"}${x}${sep}${y}`;
+  }
+  return `${d}Z`;
+}
+
+function geomToPath(geom, project, decimals = 2) {
   const polygons = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
   let d = "";
   for (const poly of polygons) {
     for (const ring of poly) {
-      ring.forEach((pt, index) => {
-        const [x, y] = project(pt);
-        d += `${index ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`;
-      });
-      d += "Z";
+      const pts = ring.map(project);
+      d += pointsToCompactSvgRing(pts, decimals);
     }
   }
   return d;
@@ -136,36 +154,61 @@ function simplifyLine(points, tolerance) {
     .concat(simplifyLine(points.slice(splitIndex), tolerance));
 }
 
-function simplifyRingSequential(points, tolerance) {
-  if (points.length <= 8) return points;
-  const simplified = [points[0]];
-  for (let i = 1; i < points.length; i += 1) {
-    const previous = simplified[simplified.length - 1];
-    const point = points[i];
-    if (Math.hypot(point[0] - previous[0], point[1] - previous[1]) >= tolerance) simplified.push(point);
+function simplifyClosedRingDP(openRing, tolerance) {
+  if (openRing.length <= 6) return openRing;
+  // Split closed ring at farthest vertex from index 0 so Douglas-Peucker preserves loop shape
+  let farIdx = Math.floor(openRing.length / 2);
+  let maxDist = -1;
+  const p0 = openRing[0];
+  for (let i = 1; i < openRing.length; i += 1) {
+    const d = Math.hypot(openRing[i][0] - p0[0], openRing[i][1] - p0[1]);
+    if (d > maxDist) {
+      maxDist = d;
+      farIdx = i;
+    }
   }
-  return simplified.length >= 3 ? simplified : points;
+  // Skip tiny degenerate sea-rock slivers when tolerance is coarse, but always keep primary polygons
+  const half1 = simplifyLine(openRing.slice(0, farIdx + 1), tolerance);
+  const half2 = simplifyLine(openRing.slice(farIdx).concat([p0]), tolerance);
+  const merged = half1.slice(0, -1).concat(half2.slice(0, -1));
+  return merged.length >= 3 ? merged : openRing.slice(0, 3);
 }
 
 function geomToSimplifiedPath(geom, project, tolerance = 0) {
-  if (!tolerance) return geomToPath(geom, project);
+  const decimals = tolerance > 0 && tolerance >= 0.08 ? 1 : 2;
+  if (!tolerance) return geomToPath(geom, project, decimals);
   const polygons = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
   let d = "";
+  let largestFallback = "";
+  let largestLen = 0;
   for (const poly of polygons) {
-    for (const ring of poly) {
+    for (let rIdx = 0; rIdx < poly.length; rIdx += 1) {
+      const ring = poly[rIdx];
       const projected = ring.map(project);
       const hasClosingPoint = projected.length > 2
-        && Math.hypot(projected[0][0] - projected[projected.length - 1][0], projected[0][1] - projected[projected.length - 1][1]) < 1e-6;
+        && Math.hypot(projected[0][0] - projected[projected.length - 1][0], projected[0][1] - projected[projected.length - 1][1]) < 1e-5;
       const openRing = hasClosingPoint ? projected.slice(0, -1) : projected;
-      const simplified = simplifyRingSequential(openRing, tolerance);
-      const points = simplified.length >= 3 ? simplified : openRing;
-      points.forEach(([x, y], index) => {
-        d += `${index ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`;
-      });
-      d += "Z";
+      if (openRing.length < 3) continue;
+
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const pt of openRing) {
+        if (pt[0] < minX) minX = pt[0];
+        if (pt[0] > maxX) maxX = pt[0];
+        if (pt[1] < minY) minY = pt[1];
+        if (pt[1] > maxY) maxY = pt[1];
+      }
+      const span = Math.hypot(maxX - minX, maxY - minY);
+      const ringStr = pointsToCompactSvgRing(simplifyClosedRingDP(openRing, tolerance), decimals);
+      if (span > largestLen) {
+        largestLen = span;
+        largestFallback = ringStr;
+      }
+      // Drop sub-pixel micro-islets at coarse national simplification while keeping at least the main ring
+      if (rIdx === 0 && span < tolerance * 0.85 && polygons.length > 3) continue;
+      d += ringStr;
     }
   }
-  return d;
+  return d || largestFallback;
 }
 
 function signedArea(points) {
@@ -197,7 +240,7 @@ function pointInRing(point, ring) {
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     const xi = ring[i][0], yi = ring[i][1];
     const xj = ring[j][0], yj = ring[j][1];
-    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-9) + xi)) inside = !inside;
+    if (((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-9) + xi)) inside = !inside;
   }
   return inside;
 }
@@ -239,27 +282,37 @@ function bestLabelPoint(feature, project) {
   const candidates = [ringCentroid(bestRing), [(bbox.minX + bbox.maxX) / 2, (bbox.minY + bbox.maxY) / 2]];
   for (let ix = 1; ix < 10; ix++) {
     for (let iy = 1; iy < 10; iy++) {
-      candidates.push([bbox.minX + (bbox.maxX - bbox.minX) * ix / 10, bbox.minY + (bbox.maxY - bbox.minY) * iy / 10]);
+      candidates.push([bbox.minX + ((bbox.maxX - bbox.minX) * ix) / 10, bbox.minY + ((bbox.maxY - bbox.minY) * iy) / 10]);
     }
   }
-  let best = candidates.find(p => pointInRing(p, bestRing)) || candidates[0];
+  let best = candidates[0];
   let bestScore = -Infinity;
+  const step = Math.max(1, Math.floor(bestRing.length / 220));
+  const sampleRing = step > 1 ? bestRing.filter((_, idx) => idx % step === 0) : bestRing;
   for (const p of candidates) {
-    if (!pointInRing(p, bestRing)) continue;
-    const score = minDistToRing(p, bestRing);
+    if (!pointInRing(p, sampleRing)) continue;
+    const score = minDistToRing(p, sampleRing);
     if (score > bestScore) {
       bestScore = score;
       best = p;
     }
   }
-  return [Number(best[0].toFixed(2)), Number(best[1].toFixed(2)), {
-    w: Number((bbox.maxX - bbox.minX).toFixed(2)),
-    h: Number((bbox.maxY - bbox.minY).toFixed(2)),
+  return [Number(best[0].toFixed(1)), Number(best[1].toFixed(1)), {
+    w: Number((bbox.maxX - bbox.minX).toFixed(1)),
+    h: Number((bbox.maxY - bbox.minY).toFixed(1)),
   }];
 }
 
 function cleanName(name) {
-  return String(name || "").replace(/市辖区$/, "").replace(/[区县市]$/g, "");
+  const raw = String(name || "").replace(/市辖区$/, "").replace(/特别行政区$/, "");
+  if (raw.length <= 2) return raw;
+  if (raw === "松山湖园区") return "松山湖";
+  if (raw === "东莞生态园") return "生态园";
+  if (/(火炬开发区|经济开发区|高新技术开发区)$/.test(raw)) return raw.replace(/开发区$/, "区");
+  return raw
+    .replace(/(黎族苗族自治县|藏族羌族自治州|蒙古族藏族自治州|哈萨克自治州|柯尔克孜自治州|傈僳族自治州|土家族苗族自治州|布依族苗族自治州|苗族侗族自治州|哈尼族彝族自治州|壮族苗族自治州|傣族景颇族自治州|傣族自治州|白族自治州|彝族自治州|藏族自治州|回族自治州|蒙古自治州|朝鲜族自治州|自治县|自治州|自治旗|地区|林区)$/, "")
+    .replace(/新区$/, "")
+    .replace(/(?<!园|开发|保税|合作|工业|风景)[区县市省盟]$/g, "");
 }
 
 function pathBounds(d) {
@@ -272,7 +325,13 @@ function pathBounds(d) {
     bounds.minY = Math.min(bounds.minY, values[i + 1]);
     bounds.maxY = Math.max(bounds.maxY, values[i + 1]);
   }
-  return Number.isFinite(bounds.minX) ? bounds : null;
+  if (!Number.isFinite(bounds.minX)) return null;
+  return {
+    minX: Number(bounds.minX.toFixed(1)),
+    minY: Number(bounds.minY.toFixed(1)),
+    maxX: Number(bounds.maxX.toFixed(1)),
+    maxY: Number(bounds.maxY.toFixed(1)),
+  };
 }
 
 function mergeBounds(items) {
@@ -293,6 +352,9 @@ function addPresentField(target, key, value) {
 function regionMetadata(record, defaultDataLevel = "") {
   const metadata = {};
   addPresentField(metadata, "mom", record?.mom);
+  addPresentField(metadata, "yoy", record?.yoy);
+  addPresentField(metadata, "newMom", record?.newMom);
+  addPresentField(metadata, "newYoy", record?.newYoy);
   addPresentField(metadata, "source", record?.source);
   addPresentField(metadata, "quality", record?.quality);
   addPresentField(metadata, "dataLevel", record?.dataLevel || defaultDataLevel);
@@ -305,17 +367,30 @@ function regionMetadata(record, defaultDataLevel = "") {
     addPresentField(metadata, "estimateRatio", record?.estimateRatio);
     addPresentField(metadata, "estimateBasis", record?.estimateBasis);
   }
+  addPresentField(metadata, "rentYield", record?.rentYield);
+  addPresentField(metadata, "priceToIncome", record?.priceToIncome);
+  addPresentField(metadata, "priceToWage", record?.priceToWage);
+  addPresentField(metadata, "peakPrice", record?.peakPrice);
+  addPresentField(metadata, "peakDate", record?.peakDate);
+  addPresentField(metadata, "troughPrice", record?.troughPrice);
+  addPresentField(metadata, "troughDate", record?.troughDate);
+  addPresentField(metadata, "drawdownPct", record?.drawdownPct);
+  addPresentField(metadata, "trendKey", record?.trendKey);
   addPresentField(metadata, "newSource", record?.newSource);
   addPresentField(metadata, "newQuality", record?.newQuality);
   addPresentField(metadata, "resaleSource", record?.resaleSource);
   addPresentField(metadata, "resaleQuality", record?.resaleQuality);
+  addPresentField(metadata, "rawSourcePrice", record?.rawSourcePrice);
+  addPresentField(metadata, "rawNewPrice", record?.rawNewPrice);
+  addPresentField(metadata, "calibrationFactor", record?.calibrationFactor);
+  addPresentField(metadata, "realDistFund", Boolean(record?.realDistrictFundamentals));
   addPresentField(metadata, "inherited", Boolean(record?.inheritedCityAverage));
   addPresentField(metadata, "supplemental", Boolean(record?.supplemental));
   return metadata;
 }
 
-function colorFor(value, breaks, colors) {
-  if (!value) return "#eef2f0";
+function colorFor(value, breaks = DEFAULT_BREAKS, colors = DEFAULT_COLORS) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value)) || Number(value) <= 0) return "#dce5ea";
   for (let i = 0; i < breaks.length - 1; i++) {
     if (value >= breaks[i] && value < breaks[i + 1]) return colors[i];
   }
@@ -325,7 +400,7 @@ function colorFor(value, breaks, colors) {
 function legendLabel(index, breaks, colors) {
   if (index === 0) return `<${fmtWanNumber(breaks[1])}万`;
   if (index === colors.length - 1) return `${fmtWanNumber(breaks[index])}万+`;
-  return `${fmtWanNumber(breaks[index])}-${fmtWanNumber(breaks[index + 1])}万`;
+  return `${fmtWanNumber(breaks[index])}-${fmtWanNumber(breaks[index + 1])}`;
 }
 
 function createInteractiveMap(config) {
@@ -338,7 +413,7 @@ function createInteractiveMap(config) {
   const outlines = config.outlines || [];
   const pathSimplifyTolerance = config.pathSimplifyTolerance || 0;
   const projection = buildProjection(features, mapBox);
-  const mapViewPadding = 82;
+  const mapViewPadding = 56;
   const mapViewBox = {
     x: Math.max(0, projection.projectedMapBounds.minX - mapViewPadding),
     y: Math.max(0, projection.projectedMapBounds.minY - mapViewPadding),
@@ -346,232 +421,711 @@ function createInteractiveMap(config) {
     h: Math.min(height, projection.projectedMapBounds.maxY + mapViewPadding) - Math.max(0, projection.projectedMapBounds.minY - mapViewPadding),
   };
   const getRecord = config.getRecord;
-  const regions = features.map((feature, index) => {
-    const record = getRecord(feature.properties.city, feature.properties.name);
+  const { featurePaths, outlinePaths } = buildTopologicalLayerPaths(features, outlines, projection.project, pathSimplifyTolerance || 0.32);
+  const svgRegions = features.map((feature, index) => {
+    const province = feature.properties.province || feature.properties.city;
+    const record = getRecord(feature.properties.city, feature.properties.name, feature);
     const price = record?.price || null;
     const [cx, cy, labelBox] = bestLabelPoint(feature, projection.project);
     const label = cleanName(feature.properties.name);
-    const d = geomToSimplifiedPath(feature.geometry, projection.project, pathSimplifyTolerance);
+    const d = featurePaths[index];
     return {
       id: `r${index}`,
+      province,
       city: feature.properties.city,
       name: feature.properties.name,
       label,
       price,
       ...regionMetadata(record, "city"),
       d,
-      bounds: pathBounds(d),
       fill: colorFor(price, breaks, colors),
       cx,
       cy,
-      labelMinScale: Number(Math.max(1.8, Math.min(5.2, ((label.length + 5) * 7) / Math.max(10, Math.min(labelBox.w, labelBox.h * 2)))).toFixed(2)),
+      labelMinScale: Number(Math.max(1.25, Math.min(4.8, ((label.length + 4) * 6.4) / Math.max(10, Math.min(labelBox.w, labelBox.h * 2)))).toFixed(2)),
     };
   });
-  const cityBoundaries = outlines.map((feature, index) => ({ id: `c${index}`, d: geomToSimplifiedPath(feature.geometry, projection.project, pathSimplifyTolerance) }));
+
+  // Strip .d from serialized client JSON to avoid duplicating 850KB of SVG path coordinates
+  const clientRegions = svgRegions.map(({ d, ...rest }) => rest);
+
+  const cityBoundaries = outlines.map((_, index) => ({
+    id: `c${index}`,
+    d: outlinePaths[index],
+  })).filter(o => o.d);
+
+  // Build South China Sea inset paths (106E..122E, 3N..23.5N)
+  const scsNW = projection.project([106.5, 23.2]);
+  const scsSE = projection.project([121.8, 3.6]);
+  const scsViewBox = `${scsNW[0].toFixed(1)} ${scsNW[1].toFixed(1)} ${(scsSE[0] - scsNW[0]).toFixed(1)} ${(scsSE[1] - scsNW[1]).toFixed(1)}`;
+  const scsOutlines = cityBoundaries.filter((_, idx) => {
+    const cName = outlines[idx]?.properties?.city || "";
+    return ["广东", "广西", "海南", "台湾", "香港", "澳门", "福建"].some(k => cName.includes(k));
+  });
+
   const cityLabels = Object.entries(config.labelCenters || {}).map(([label, coord]) => {
     const [x, y] = projection.project(coord);
     return { label, x: Number(x.toFixed(1)), y: Number(y.toFixed(1)) };
   });
+
   const isInheritedRegion = r => Boolean(r.inherited || r.dataLevel === "city-inherited");
   const regionClasses = r => `region${isInheritedRegion(r) ? " inheritedRegion" : ""}`;
-  const regionAttrs = r => `data-city="${esc(r.city)}" data-name="${esc(r.name)}" data-level="${esc(r.dataLevel || "")}" data-inherited="${isInheritedRegion(r) ? "true" : "false"}"`;
-  const detailLabelText = r => `${esc(r.label)} ${fmtWanLabel(r.price)}${r.priceType === "resale-estimated" ? " 估" : ""}${isInheritedRegion(r) ? " 市均" : ""}`;
+  const detailLabelText = r => `${esc(r.label)} ${fmtWanLabel(r.price)}`;
+
+  const initialCenter = config.initialView?.center || [105.2, 35.4];
+  const initialScale = config.initialView?.scale || 1.24;
+  const trendsUrl = config.trendsUrl || "data/china_city_trends.json";
+  const streetPlatesUrl = config.streetPlatesUrl || "data/china_street_plates.json";
 
   return `<!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="${esc(config.subtitle || "全国城市及区县住宅挂牌价、新房均价、租金回报率、房价收入比与近12个月走势交互地图")}">
 <title>${esc(config.pageTitle)}</title>
 <style>
-  :root { --ink:#1b2c33; --muted:#63767d; --line:#dbe6e3; --brand:#2f89a6; --overlay-opacity:.60; --label-scale:1.50; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:"Microsoft YaHei","Noto Sans CJK SC",Arial,sans-serif; color:var(--ink); background:linear-gradient(135deg,#f7faf8,#f4f0e8); }
-  .app { min-height:100vh; display:grid; grid-template-columns:minmax(720px,1fr) 430px; gap:18px; padding:24px; }
-  .mapShell,.side { min-width:0; background:rgba(255,255,255,.86); border:1px solid var(--line); border-radius:14px; box-shadow:0 18px 38px rgba(37,70,80,.10); }
-  .mapShell { position:relative; overflow:hidden; min-height:calc(100vh - 48px); overscroll-behavior:contain; }
-  header { position:absolute; z-index:3; left:26px; top:22px; pointer-events:none; }
-  h1 { margin:0; font-size:34px; letter-spacing:0; }
-  header p { margin:8px 0 0; color:var(--muted); font-size:14px; }
-  .toolbar { position:absolute; right:18px; top:18px; z-index:4; display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
-  .presetBar { position:absolute; z-index:4; left:26px; top:104px; display:flex; gap:7px; flex-wrap:wrap; max-width:min(640px,calc(100% - 360px)); }
-  button,.mapNav,input { border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:8px; font:inherit; }
-  button,.mapNav { height:36px; padding:8px 12px; cursor:pointer; text-decoration:none; line-height:18px; }
-  button:hover,.mapNav:hover { border-color:#9fcac6; }
-  button.active,.mapNav.active { border-color:#2f89a6; background:#edf7f6; color:#1f6677; font-weight:800; }
-  svg { width:100%; height:calc(100vh - 48px); display:block; cursor:grab; touch-action:none; user-select:none; }
-  svg.dragging { cursor:grabbing; }
-  #viewport { will-change:transform; }
-  .regionSeal { fill:none; stroke-width:1.1; pointer-events:none; opacity:.92; vector-effect:non-scaling-stroke; stroke-linejoin:round; stroke-linecap:round; }
-  .detailDataset { transition:opacity .16s; }
-  .detailDataset.hidden { display:none; }
-  #priceOverlay { transition:opacity .15s; }
-  .mapTilesOn #priceOverlay { opacity:var(--overlay-opacity); }
-  .region { stroke:rgba(255,255,255,.92); stroke-width:.85; vector-effect:non-scaling-stroke; transition:opacity .15s; }
-  svg.dragging .region { pointer-events:none; }
-  .cityBoundary { fill:none; stroke:#153f49; stroke-width:2.1; vector-effect:non-scaling-stroke; pointer-events:none; opacity:.7; }
-  .highlightPath { fill:none; pointer-events:none; vector-effect:non-scaling-stroke; stroke-linejoin:round; stroke-linecap:round; }
-  #hoverHighlight { stroke:#ffd15c; stroke-width:3.2; opacity:.95; }
-  #selectedHighlight { fill:rgba(22,183,168,.18); stroke:#0ba99d; stroke-width:4; opacity:1; }
-  #selectedPulse { stroke:#0ba99d; stroke-width:8; opacity:.22; animation:selectedPulse 1.8s ease-in-out infinite; }
-  .inheritedRegion { stroke-dasharray:2.8 2.2; }
-  @keyframes selectedPulse { 0%,100%{opacity:.12;stroke-width:5} 50%{opacity:.30;stroke-width:8} }
-  .dimmed { opacity:.18; }
-  .cityLabel { font-size:calc(17px * var(--label-scale)); font-weight:900; fill:#0c5261; paint-order:stroke; stroke:rgba(255,255,255,.88); stroke-width:4.4px; pointer-events:none; }
-  .detailLabel { display:none; font-size:calc(8.4px * var(--label-scale)); font-weight:800; fill:#25363d; paint-order:stroke; stroke:rgba(255,255,255,.94); stroke-width:2px; pointer-events:none; }
-  .mapShell.isMoving .region { transition:none; }
-  .tileBuffer { opacity:0; transition:opacity .16s ease; }
-  .tileBuffer.active { opacity:1; }
-  .tileImage { opacity:.78; }
-  .legend,.tileAttribution,.mapControl { position:absolute; z-index:4; background:rgba(255,255,255,.84); border:1px solid var(--line); }
-  .legend { left:26px; bottom:22px; border-radius:12px; padding:12px 14px; }
-  .legendTitle { font-weight:800; margin-bottom:8px; }
-  .swatches { display:flex; gap:6px; align-items:center; }
-  .swatch { width:58px; height:16px; border-radius:4px; }
-  .legendLabels { display:grid; grid-template-columns:repeat(${colors.length},58px); gap:6px; margin-top:6px; color:var(--muted); font-size:10.5px; white-space:nowrap; }
-  .tileAttribution { right:18px; bottom:16px; display:none; border-radius:8px; padding:5px 8px; color:var(--muted); font-size:11px; }
-  .mapTilesOn .tileAttribution { display:block; }
-  .mapControl { right:18px; top:62px; display:grid; grid-template-columns:auto minmax(0,1fr) 42px; align-items:center; gap:8px; width:272px; padding:8px 10px; border-radius:10px; font-size:12px; font-weight:800; }
-  .labelControl { top:62px; }
-  .overlayControl { top:106px; display:none; }
-  .mapTilesOn .overlayControl { display:grid; }
-  .mapControl input { width:100%; min-width:0; accent-color:var(--brand); }
-  .mapControl span { text-align:right; color:var(--muted); font-weight:700; }
-  .tooltip { position:fixed; z-index:10; min-width:190px; padding:10px 12px; background:#11262e; color:#fff; border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,.22); transform:translate(12px,12px); pointer-events:none; display:none; }
-  .tooltip strong { display:block; font-size:16px; margin-bottom:4px; }
-  .tooltip span { display:block; color:#cfe0df; font-size:13px; }
-  .side { padding:22px; overflow:auto; max-height:calc(100vh - 48px); }
-  .side h2 { margin:0 0 6px; font-size:24px; }
-  .caption,.notes { color:var(--muted); font-size:13px; line-height:1.7; }
-  .search { width:100%; height:40px; padding:0 12px; margin:14px 0; }
-  .sortBar { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:14px; }
-  .sortBar button { height:32px; padding:0 8px; font-size:13px; }
-  .selected { min-height:104px; border:1px solid var(--line); background:#f7fbfa; border-radius:10px; padding:14px; margin-bottom:16px; }
-  .selected .name { font-size:20px; font-weight:900; }
-  .selected .price { color:#173864; font-size:28px; font-weight:900; margin-top:6px; }
-  .selected .meta { color:var(--muted); margin-top:4px; }
-  .rows { display:grid; gap:6px; }
-  .row { display:grid; grid-template-columns:1fr auto auto auto auto; gap:9px; align-items:center; padding:9px 10px; border-radius:8px; cursor:pointer; }
-  .row:hover,.row.active { background:#edf6f4; }
-  .row b { font-size:14px; }
-  .row .price { color:#173864; font-weight:800; }
-  .levelBadge { border:1px solid #c9d8d5; border-radius:999px; color:#49666d; font-size:11px; font-weight:800; line-height:1; padding:4px 6px; background:#f7faf8; white-space:nowrap; }
-  .levelBadge.inherited { border-color:#e4c17b; color:#7a5a10; background:#fff8df; }
-  .levelBadge.new { border-color:#85c9b8; color:#116250; background:#ecfaf5; }
-  .levelBadge.district { border-color:#9ccfc8; color:#17675d; background:#eaf8f6; }
-  .levelBadge.supplement { border-color:#c6b4e8; color:#5b3d8a; background:#f4efff; }
-  .locateRow { height:28px; padding:0 9px; font-size:12px; white-space:nowrap; }
-  .up { color:#087b60; } .down { color:#bd4c45; }
-  .notes { margin-top:18px; border-top:1px solid var(--line); padding-top:14px; font-size:12px; }
-  @media (max-width:1100px){ .app{grid-template-columns:1fr}.mapShell{min-height:72vh}svg{height:72vh}.side{max-height:none} }
-  @media (max-width:760px){ .app{padding:6px;gap:8px;max-width:100vw;overflow:hidden}.mapShell{min-height:82svh;border-radius:10px}header{left:8px;top:8px;max-width:calc(100% - 174px);padding:7px 9px;border:1px solid rgba(219,230,227,.9);border-radius:10px;background:rgba(255,255,255,.72);backdrop-filter:blur(8px)}h1{font-size:17px;line-height:1.1}header p{display:none}.presetBar{left:8px;right:8px;top:51px;max-width:none;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px}.presetBar button{height:30px;white-space:nowrap;font-size:12px;padding:0 9px}.toolbar{left:auto;right:8px;top:8px;width:153px;display:grid;grid-template-columns:repeat(2,74px);gap:5px}.toolbar button,.toolbar .mapNav{width:74px;height:32px;padding:7px 0;font-size:12px;text-align:center;justify-content:center}.toolbar #toggleTiles{width:153px;grid-column:1/3}.mapControl{left:8px;right:8px;top:auto;width:auto;padding:6px 8px;font-size:11px}.labelControl{bottom:80px}.overlayControl{bottom:126px}svg{height:82svh}.cityLabel{font-size:calc(17px * var(--label-scale));stroke-width:4.8px}.detailLabel{font-size:calc(11px * var(--label-scale));stroke-width:2.9px}.legend{left:8px;right:8px;bottom:8px;padding:8px;border-radius:10px}.swatch{width:auto;flex:1;min-width:0;height:12px}.legendLabels{grid-template-columns:repeat(${colors.length},1fr);gap:4px;font-size:8.4px}.side{padding:14px;border-radius:10px}.sortBar{grid-template-columns:repeat(2,1fr)} }
-  @media (max-width:760px){ .mapShell{width:calc(100vw - 12px);max-width:calc(100vw - 12px)}.mapControl{right:auto;width:min(340px,calc(100vw - 28px));max-width:calc(100vw - 28px);grid-template-columns:52px minmax(0,1fr) 38px}.legend{right:auto;width:min(340px,calc(100vw - 28px));max-width:calc(100vw - 28px)} }
+  :root {
+    --bg-ocean: #e6eff5;
+    --bg-ocean-accent: #dbe8f0;
+    --bg-panel: #ffffff;
+    --bg-subtle: #f3f7fa;
+    --bg-hover: #e9f2f7;
+    --bg-hud: rgba(255, 255, 255, 0.90);
+    --ink: #0f222d;
+    --ink-secondary: #37505e;
+    --ink-muted: #466170;
+    --line: #d4e1e8;
+    --line-strong: #b3c8d4;
+    --brand: #0c6e8c;
+    --brand-ink: #085066;
+    --brand-soft: #e3f3f8;
+    --accent: #d97706;
+    --up: #c2392f;
+    --up-bg: #fdeeed;
+    --down: #0c7b5e;
+    --down-bg: #eaf8f3;
+    --province-stroke: #173e4d;
+    --region-stroke: #f4f8fb;
+    --label-fill: #132936;
+    --label-halo: rgba(255, 255, 255, 0.94);
+    --hud-shadow: 0 8px 24px rgba(15, 34, 45, 0.09);
+    --overlay-opacity: 0.72;
+    --label-scale: 1.38;
+    --inv-scale: 1;
+  }
+  [data-theme="dark"] {
+    --bg-ocean: #09141e;
+    --bg-ocean-accent: #0d1c29;
+    --bg-panel: #0f1d2a;
+    --bg-subtle: #152738;
+    --bg-hover: #1b3247;
+    --bg-hud: rgba(15, 29, 42, 0.90);
+    --ink: #e7f1f7;
+    --ink-secondary: #b0c7d6;
+    --ink-muted: #93afc2;
+    --line: #1f3548;
+    --line-strong: #31506b;
+    --brand: #38bdf8;
+    --brand-ink: #7dd3fc;
+    --brand-soft: rgba(56, 189, 248, 0.15);
+    --accent: #fbbf24;
+    --up: #f87171;
+    --up-bg: rgba(248, 113, 113, 0.15);
+    --down: #34d399;
+    --down-bg: rgba(52, 211, 153, 0.15);
+    --province-stroke: #cbe3f0;
+    --region-stroke: #0c1a27;
+    --label-fill: #f0f7fc;
+    --label-halo: rgba(9, 20, 30, 0.92);
+    --hud-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+  }
+  * { box-sizing: border-box; }
+  ::selection { background: var(--brand); color: #fff; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg-ocean); color: var(--ink); font-family: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, -apple-system, sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  .num, .price, .swatchCount, .kpiVal, .calcVal, .row, .legendLabels, .tooltip { font-variant-numeric: tabular-nums; }
+  button, select, input { font: inherit; color: var(--ink); }
+  button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+  .app { height: 100dvh; width: 100vw; display: grid; grid-template-columns: minmax(0, 1fr) 436px; overflow: hidden; transition: grid-template-columns 0.24s cubic-bezier(0.22, 1, 0.36, 1); }
+  body.sidebarCollapsed .app { grid-template-columns: minmax(0, 1fr) 0px; }
+  body.sidebarCollapsed .side { border-left-width: 0; opacity: 0; pointer-events: none; }
+
+  .mapShell { position: relative; min-width: 0; height: 100dvh; overflow: hidden; overscroll-behavior: contain; background: radial-gradient(circle at 52% 44%, var(--bg-ocean) 0%, var(--bg-ocean-accent) 100%); }
+  svg#map { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; user-select: none; }
+  svg#map.dragging { cursor: grabbing; }
+  #viewport { will-change: transform; }
+
+  /* HUD Overlays */
+  .hudCard { background: var(--bg-hud); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--line); box-shadow: var(--hud-shadow); border-radius: 12px; }
+  .hudTopStack { position: absolute; z-index: 6; left: 16px; right: 16px; top: 14px; display: flex; flex-direction: column; gap: 7px; pointer-events: none; }
+  .hudTopBar { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; pointer-events: none; }
+  .hudSubStack { display: flex; flex-direction: column; gap: 7px; pointer-events: none; }
+  .hudSubStack > * { pointer-events: auto; }
+  .hudTopLeft { display: flex; flex-direction: column; gap: 7px; min-width: 0; flex: 1 1 auto; pointer-events: none; }
+  .hudTopLeft > * { pointer-events: auto; }
+  .brandBlock { padding: 7px 12px; display: inline-flex; align-items: center; gap: 9px; flex-wrap: nowrap; width: fit-content; max-width: 100%; min-width: 0; }
+  .brandBlock h1 { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; white-space: nowrap; flex-shrink: 0; }
+  .brandMeta { font-size: 12px; color: var(--ink-secondary); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .liveDot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; display: inline-block; flex-shrink: 0; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18); }
+
+  .metricTabs { display: inline-flex; padding: 3px; gap: 2px; width: fit-content; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .metricTabs::-webkit-scrollbar { display: none; }
+  .metricTab { border: 0; background: transparent; color: var(--ink-secondary); height: 29px; padding: 0 10px; border-radius: 8px; font-size: 12.5px; font-weight: 700; cursor: pointer; transition: background 0.15s, color 0.15s; white-space: nowrap; }
+  .metricTab:hover { color: var(--ink); background: var(--bg-hover); }
+  .metricTab.active { background: var(--brand); color: #fff; font-weight: 800; }
+  [data-theme="dark"] .metricTab.active { color: #06131c; }
+
+  .presetBar { display: flex; gap: 5px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; max-width: 100%; padding-bottom: 2px; }
+  .presetBar::-webkit-scrollbar { display: none; }
+  .presetButton { border: 1px solid var(--line); background: var(--bg-hud); backdrop-filter: blur(8px); color: var(--ink-secondary); height: 27px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 700; cursor: pointer; transition: border-color 0.15s, background 0.15s, color 0.15s; white-space: nowrap; flex-shrink: 0; }
+  .presetButton:hover { border-color: var(--brand); color: var(--ink); }
+  .presetButton.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); font-weight: 800; }
+
+  .hudTopRight { position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: 0 0 auto; pointer-events: none; }
+  .hudTopRight > * { pointer-events: auto; }
+  .toolbar { display: flex; gap: 4px; flex-wrap: nowrap; justify-content: flex-end; padding: 4px; }
+  .toolBtn { border: 0; background: transparent; color: var(--ink); height: 31px; min-width: 31px; padding: 0 8px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px; transition: background 0.15s, color 0.15s; white-space: nowrap; }
+  .toolBtn:hover { background: var(--bg-hover); }
+  .toolBtn.active { background: var(--brand-soft); color: var(--brand-ink); }
+  .toolBtn svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.85; fill: none; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+  .toolSep { width: 1px; height: 20px; background: var(--line); align-self: center; margin: 0 1px; }
+
+  .popoverPanel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 12; width: 292px; padding: 12px 14px; display: none; flex-direction: column; gap: 11px; }
+  .popoverPanel.open { display: flex; }
+  .popRow { display: grid; grid-template-columns: 74px minmax(0, 1fr) 42px; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--ink-secondary); }
+  .popRow input[type="range"] { width: 100%; accent-color: var(--brand); cursor: pointer; }
+  .popRow span { text-align: right; font-weight: 700; color: var(--ink); }
+  .budgetPanel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 12; width: 326px; padding: 12px 14px; display: none; flex-direction: column; gap: 10px; }
+  .budgetPanel.open { display: flex; }
+  .budgetHead { display: flex; justify-content: space-between; align-items: center; font-weight: 800; font-size: 13px; }
+  .budgetSummary { font-size: 12px; color: var(--ink-secondary); background: var(--bg-subtle); border-radius: 8px; padding: 7px 9px; line-height: 1.5; }
+  .budgetSummary b { color: var(--brand-ink); }
+  .modeSwitch { display: grid; grid-template-columns: 1fr 1fr; background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 9px; padding: 4px; gap: 4px; }
+  .modeSwitchBtn { border: 0; background: transparent; color: var(--ink-secondary); height: 29px; padding: 0 10px; border-radius: 6px; font-size: 12px; font-weight: 750; cursor: pointer; }
+  .modeSwitchBtn.active { background: var(--bg-panel); color: var(--brand-ink); box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+  .profileGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+  .profileBtn { border: 1px solid var(--line); background: var(--bg-panel); border-radius: 8px; padding: 6px 5px; font-size: 11.5px; font-weight: 750; color: var(--ink-secondary); cursor: pointer; text-align: center; line-height: 1.35; }
+  .profileBtn:hover { border-color: var(--brand); color: var(--ink); }
+  .profileBtn.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
+  .profileBtn small { display: block; font-size: 11px; font-weight: 600; color: var(--ink-muted); margin-top: 2px; }
+
+  .radiusPanel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 12; width: 336px; padding: 12px 14px; display: none; flex-direction: column; gap: 9px; }
+  .radiusPanel.open { display: flex; }
+  .ringStatGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+  .ringStatCell { background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 7px; padding: 6px 7px; text-align: center; }
+  .ringStatCell span { display: block; font-size: 11px; color: var(--ink-muted); }
+  .ringStatCell b { display: block; font-size: 12.5px; font-weight: 800; color: var(--ink); margin-top: 2px; }
+  .arbList { display: flex; flex-direction: column; gap: 4px; max-height: 164px; overflow-y: auto; }
+  .arbItem { border: 1px solid var(--line); background: var(--bg-panel); border-radius: 7px; padding: 5px 8px; display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 11.5px; cursor: pointer; }
+  .arbItem:hover { border-color: var(--brand); background: var(--brand-soft); }
+
+  /* Timeline Playback Bar */
+  .timelineDock { position: absolute; z-index: 10; left: 50%; bottom: 16px; transform: translateX(-50%); display: none; align-items: center; gap: 10px; padding: 8px 13px; width: min(560px, calc(100% - 240px)); }
+  .timelineDock.open { display: flex; }
+  .tlPlayBtn { border: 0; background: var(--brand); color: #fff; width: 30px; height: 30px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  [data-theme="dark"] .tlPlayBtn { color: #06131c; }
+  .tlPlayBtn svg { width: 14px; height: 14px; fill: currentColor; }
+  .tlMonth { font-size: 13px; font-weight: 800; color: var(--ink); min-width: 58px; white-space: nowrap; }
+  .tlSlider { flex: 1 1 auto; accent-color: var(--brand); cursor: pointer; min-width: 90px; }
+
+  /* Commute Ring SVG Styles */
+  .commuteRing { fill: rgba(12, 110, 140, 0.04); stroke: var(--brand); stroke-width: 1.5; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .commuteRingLabel { font-size: 11px; font-weight: 800; fill: var(--brand-ink); paint-order: stroke; stroke: var(--label-halo); stroke-width: 3px; pointer-events: none; }
+  .rulerLine { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .rulerBadge { font-size: 11.5px; font-weight: 800; fill: #fff; pointer-events: none; }
+  .linkBtn { border: 0; background: none; color: var(--brand); font-size: 12px; font-weight: 700; cursor: pointer; padding: 2px 4px; }
+  .linkBtn:hover { text-decoration: underline; }
+
+  /* SVG Map Paths & Labels */
+  .detailDataset { transition: opacity 0.16s; }
+  .detailDataset.hidden { display: none; }
+  #priceOverlay { transition: opacity 0.15s; }
+  .mapTilesOn #priceOverlay { opacity: var(--overlay-opacity); }
+  .region { stroke: var(--region-stroke); stroke-width: 0.85; vector-effect: non-scaling-stroke; paint-order: fill stroke; stroke-linejoin: round; stroke-linecap: round; fill-rule: evenodd; cursor: pointer; transition: opacity 0.14s; }
+  svg.dragging .region, .mapShell.isMoving .region { transition: none; pointer-events: none; }
+  .coveredByDetail { visibility: hidden; pointer-events: none; }
+  .underlaySeal { pointer-events: none; stroke: none; }
+  .cityBoundary { fill: none; stroke: var(--province-stroke); stroke-width: 1.55; vector-effect: non-scaling-stroke; pointer-events: none; opacity: 0.58; stroke-linejoin: round; stroke-linecap: round; }
+  .highlightPath { fill: none; pointer-events: none; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+  #hoverHighlight { stroke: #fbbf24; stroke-width: 2.8; opacity: 0.96; }
+  #selectedHighlight { fill: rgba(14, 165, 233, 0.16); stroke: #0ea5e9; stroke-width: 3.4; opacity: 1; }
+  #selectedPulse { stroke: #0ea5e9; stroke-width: 7; opacity: 0.22; animation: selectedPulse 2s ease-in-out infinite; }
+  .inheritedRegion { stroke-dasharray: 2.6 2; }
+  @keyframes selectedPulse { 0%, 100% { opacity: 0.10; stroke-width: 4.5; } 50% { opacity: 0.28; stroke-width: 7.5; } }
+  .dimmed { opacity: 0.14 !important; }
+
+  .cityLabel { font-size: calc(15px * var(--label-scale)); font-weight: 800; fill: var(--label-fill); paint-order: stroke; stroke: var(--label-halo); stroke-width: 3.8px; pointer-events: none; }
+  .detailLabel { display: none; font-size: calc(8.2px * var(--label-scale)); font-weight: 750; fill: var(--label-fill); paint-order: stroke; stroke: var(--label-halo); stroke-width: 2.2px; pointer-events: none; }
+  .plateNode { cursor: pointer; }
+  svg.dragging .plateNode, .mapShell.isMoving .plateNode { pointer-events: none; }
+  .plateBg { fill: var(--bg-panel); fill-opacity: 0.94; stroke: var(--line-strong); stroke-width: 1; }
+  .plateNode:hover .plateBg, .plateNode.active .plateBg { stroke: var(--brand); stroke-width: 1.65; fill: var(--brand-soft); }
+  .plateTxt { font-size: 11px; font-weight: 750; fill: var(--ink); pointer-events: none; }
+
+  .tileBuffer { opacity: 0; transition: opacity 0.16s ease; }
+  .tileBuffer.active { opacity: 1; }
+  .tileImage { opacity: 0.82; }
+  [data-theme="dark"] .tileImage { filter: brightness(0.76) contrast(1.08) saturate(0.85); }
+
+  /* Legend & South China Sea Inset */
+  .legend { position: absolute; z-index: 5; left: 16px; bottom: 16px; padding: 10px 13px; max-width: calc(100% - 140px); }
+  .legendHead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
+  .legendTitle { font-size: 12px; font-weight: 800; color: var(--ink); }
+  .legendHint { font-size: 11px; color: var(--ink-muted); display: flex; align-items: center; gap: 8px; }
+  .legendDistBar { display: flex; height: 5px; border-radius: 999px; overflow: hidden; background: var(--bg-subtle); margin-bottom: 6px; gap: 1px; }
+  .legendDistSeg { height: 100%; min-width: 2px; transition: width 0.22s ease; }
+  .swatches { display: grid; grid-template-columns: repeat(8, minmax(46px, 56px)); gap: 4px; }
+  .swatchBtn { border: 1px solid rgba(0, 0, 0, 0.08); height: 14px; border-radius: 4px; cursor: pointer; padding: 0; transition: transform 0.12s, box-shadow 0.12s, opacity 0.12s; }
+  .swatchBtn:hover { transform: translateY(-1px); }
+  .swatchBtn.active { box-shadow: 0 0 0 2px var(--ink); transform: translateY(-1px); }
+  .swatchBtn.muted { opacity: 0.28; }
+  .legendLabels { display: grid; grid-template-columns: repeat(8, minmax(46px, 56px)); gap: 4px; margin-top: 4px; color: var(--ink-secondary); font-size: 11px; text-align: center; white-space: nowrap; }
+  .legendFoot { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 12px; font-size: 11.5px; color: var(--ink-muted); }
+  .dashSample { width: 16px; border-top: 2px dashed var(--ink-muted); display: inline-block; vertical-align: middle; margin-right: 4px; }
+
+  .hudBottomRight { position: absolute; z-index: 5; right: 16px; bottom: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .scsInset { width: 88px; height: 112px; padding: 4px; cursor: pointer; position: relative; overflow: hidden; transition: border-color 0.15s; }
+  .scsInset:hover { border-color: var(--brand); }
+  .scsInset svg { width: 100%; height: 100%; display: block; background: var(--bg-ocean); border-radius: 7px; }
+  .scsInset path { fill: #cbd9e2; stroke: var(--province-stroke); stroke-width: 1; vector-effect: non-scaling-stroke; }
+  [data-theme="dark"] .scsInset path { fill: #1e3547; }
+  .scsLabel { position: absolute; right: 7px; bottom: 6px; font-size: 11px; font-weight: 700; color: var(--ink-secondary); background: var(--bg-hud); padding: 1px 4px; border-radius: 4px; pointer-events: none; }
+  .scaleBadge { padding: 4px 9px; font-size: 11.5px; font-weight: 700; color: var(--ink-secondary); display: flex; align-items: center; gap: 6px; }
+  .tileAttribution { display: none; font-size: 11px; color: var(--ink-muted); padding: 3px 7px; }
+  .mapTilesOn .tileAttribution { display: block; }
+
+  /* Sidebar Analytical Workbench */
+  .side { background: var(--bg-panel); border-left: 1px solid var(--line); height: 100dvh; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+  .sideScroll { flex: 1; overflow-y: auto; padding: 16px 18px 24px; display: flex; flex-direction: column; gap: 14px; }
+  .kpiWrap { display: flex; flex-direction: column; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .kpiHeadRow { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--ink-muted); font-weight: 700; }
+  .kpiStrip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .kpiItem { background: var(--bg-subtle); border-radius: 9px; padding: 8px 9px; min-width: 0; }
+  .kpiLabel { font-size: 11px; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpiVal { font-size: 15px; font-weight: 800; color: var(--ink); margin-top: 2px; white-space: nowrap; }
+
+  /* Selected Region Dossier */
+  .dossier { border: 1px solid var(--line); background: var(--bg-subtle); border-radius: 12px; padding: 13px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .dossierHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+  .dossierCrumb { font-size: 11.5px; color: var(--ink-muted); font-weight: 600; }
+  .dossierTitle { font-size: 19px; font-weight: 800; color: var(--ink); margin-top: 1px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .dossierActions { display: flex; gap: 5px; flex-shrink: 0; }
+  .miniBtn { border: 1px solid var(--line-strong); background: var(--bg-panel); color: var(--ink-secondary); height: 27px; padding: 0 8px; border-radius: 7px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .miniBtn:hover { border-color: var(--brand); color: var(--brand-ink); }
+  .miniBtn.active { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-ink); }
+
+  .priceHeroRow { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .priceHero { font-size: 27px; font-weight: 850; letter-spacing: -0.02em; color: var(--ink); }
+  .priceHero small { font-size: 13px; font-weight: 700; color: var(--ink-secondary); margin-left: 2px; }
+  .deltaGroup { display: flex; gap: 5px; flex-wrap: wrap; }
+  .pill { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 6px; font-size: 11.5px; font-weight: 750; white-space: nowrap; }
+  .pill.up { color: var(--up); background: var(--up-bg); }
+  .pill.down { color: var(--down); background: var(--down-bg); }
+  .pill.neutral { color: var(--ink-secondary); background: var(--bg-panel); border: 1px solid var(--line); }
+
+  .metricGrid4 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .mCell { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; }
+  .mCell span { display: block; font-size: 11px; color: var(--ink-muted); }
+  .mCell b { display: block; font-size: 13.5px; font-weight: 800; margin-top: 2px; color: var(--ink); }
+  .mCell em { font-style: normal; font-size: 11px; color: var(--ink-secondary); }
+
+  /* 10-Year Range Gauge */
+  .rangeBox { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .rangeTop { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ink-secondary); margin-bottom: 6px; }
+  .rangeTrack { position: relative; height: 7px; border-radius: 999px; background: linear-gradient(90deg, #3f87b5, #bfe3b4, #f5cf86, #c8413a); }
+  .rangePin { position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%; background: var(--ink); border: 2px solid var(--bg-panel); transform: translate(-50%, -50%); box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
+  .rangeEnds { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-muted); margin-top: 5px; }
+
+  /* 12-Month SVG Trend Chart */
+  .trendBox { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .trendHead { display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 4px; }
+  .trendLegend { display: flex; gap: 10px; font-size: 11.5px; color: var(--ink-secondary); }
+  .legendLine { display: inline-block; width: 12px; height: 2.5px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
+  .trendSvg { width: 100%; height: 96px; display: block; overflow: visible; }
+
+  /* Mortgage & Rent Calculator */
+  details.calcBox { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  details.calcBox summary { cursor: pointer; font-size: 12px; font-weight: 800; color: var(--ink-secondary); list-style: none; display: flex; justify-content: space-between; align-items: center; }
+  details.calcBox summary::-webkit-details-marker { display: none; }
+  .calcControls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+  .calcControls label { font-size: 11px; color: var(--ink-muted); display: flex; flex-direction: column; gap: 3px; }
+  .calcControls select { height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-subtle); padding: 0 5px; font-size: 12px; font-weight: 700; }
+  .calcResult { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+  .calcVal span { display: block; font-size: 11px; color: var(--ink-muted); }
+  .calcVal b { font-size: 13px; font-weight: 800; color: var(--ink); }
+
+  .quickPick { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+  .quickChip { border: 1px solid var(--line); background: var(--bg-panel); color: var(--ink-secondary); border-radius: 999px; height: 26px; padding: 0 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .quickChip:hover { border-color: var(--brand); color: var(--brand-ink); }
+  .sourceFoot { font-size: 12.5px; color: var(--ink-muted); line-height: 1.55; }
+
+  /* Street & Business-Circle Sub-Layer UI */
+  .plateBox { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .plateHead { display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 12px; font-weight: 800; color: var(--ink); flex-wrap: wrap; }
+  .plateHead small { font-size: 11px; font-weight: 600; color: var(--ink-muted); }
+  .plateGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; max-height: 196px; overflow-y: auto; padding-right: 2px; }
+  .plateChip { border: 1px solid var(--line); background: var(--bg-subtle); border-radius: 7px; padding: 5px 7px; display: flex; justify-content: space-between; align-items: center; gap: 5px; cursor: pointer; text-align: left; font-size: 11.5px; transition: border-color 0.14s, background 0.14s; }
+  .plateChip:hover, .plateChip.active { border-color: var(--brand); background: var(--brand-soft); }
+  .plateChipName { font-weight: 750; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plateChipVal { font-weight: 800; color: var(--brand-ink); white-space: nowrap; font-size: 11.5px; }
+  .plateSelectedBanner { background: var(--brand-soft); border: 1px solid var(--brand); border-radius: 7px; padding: 7px 9px; font-size: 12px; color: var(--ink); line-height: 1.5; }
+  .streetDirList { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .streetTag { display: inline-block; padding: 2px 7px; border-radius: 999px; background: var(--bg-subtle); border: 1px solid var(--line); font-size: 11px; color: var(--ink-secondary); }
+
+  /* Community (Xiaoqu) On-Demand Drilldown & Pins */
+  .xqPinNode { cursor: pointer; }
+  svg.dragging .xqPinNode, .mapShell.isMoving .xqPinNode { pointer-events: none; }
+  .xqPinBg { fill: #0f222d; fill-opacity: 0.94; stroke: #38bdf8; stroke-width: 1.5; }
+  .xqPinNode.active .xqPinBg, .xqPinNode:hover .xqPinBg { fill: var(--brand); stroke: #fbbf24; stroke-width: 2; }
+  .xqPinTxt { font-size: 11px; font-weight: 800; fill: #ffffff; pointer-events: none; }
+  .xqBox { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; display: flex; flex-direction: column; gap: 7px; margin-top: 4px; }
+  .xqRows { display: flex; flex-direction: column; gap: 5px; max-height: 224px; overflow-y: auto; padding-right: 2px; }
+  .xqRow { border: 1px solid var(--line); background: var(--bg-subtle); border-radius: 7px; padding: 7px 9px; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto auto; align-items: center; gap: 6px; font-size: 11.5px; cursor: pointer; }
+  .xqRow:hover, .xqRow.active { border-color: var(--brand); background: var(--brand-soft); }
+  .xqRow .price { color: var(--ink); font-weight: 800; font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .xqRow .iconAct { display: inline-flex; align-items: center; justify-content: center; }
+  .xqName { font-weight: 750; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .xqSpecCard { background: var(--bg-subtle); border: 1px solid var(--brand); border-radius: 8px; padding: 9px 10px; display: flex; flex-direction: column; gap: 7px; }
+  .xqSpecGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+  .xqSpecCell { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 8px; }
+  .xqSpecCell span { display: block; font-size: 11px; color: var(--ink-muted); }
+  .xqSpecCell b { display: block; font-size: 12px; font-weight: 800; color: var(--ink); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 5-Dimension Local Home-Buying Advisor & Optional BYOK AI */
+  .adviceBox { background: var(--bg-panel); border: 1px solid var(--line-strong); border-radius: 9px; padding: 10px 11px; display: flex; flex-direction: column; gap: 8px; }
+  .adviceHead { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .adviceTitle { font-size: 12.5px; font-weight: 800; color: var(--ink); }
+  .adviceList { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--ink-secondary); line-height: 1.52; }
+  .adviceList li b { color: var(--ink); }
+  .aiForm { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; }
+  .aiInput { width: 100%; height: 32px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg-subtle); font-size: 12px; }
+  .aiGrid2 { display: grid; grid-template-columns: 1.3fr 1fr; gap: 6px; }
+  .aiOutput { background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 7px; padding: 9px 10px; font-size: 12px; line-height: 1.6; color: var(--ink); white-space: pre-wrap; max-height: 280px; overflow-y: auto; }
+
+  /* Filter & Ranking Controls */
+  .filterBlock { display: flex; flex-direction: column; gap: 8px; }
+  .searchRow { display: grid; grid-template-columns: minmax(0, 1fr) 126px; gap: 7px; }
+  .searchWrap { position: relative; display: flex; align-items: center; }
+  .search { width: 100%; height: 36px; padding: 0 28px 0 11px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg-panel); font-size: 13px; }
+  .search::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; display: none; }
+  .searchClear { position: absolute; right: 6px; border: 0; background: none; color: var(--ink-muted); cursor: pointer; font-size: 15px; display: none; padding: 2px 5px; }
+  .provSelect { height: 36px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg-panel); padding: 0 7px; font-size: 12.5px; font-weight: 700; }
+
+  .subFilterRow { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .scopePills { display: inline-flex; background: var(--bg-subtle); padding: 2px; border-radius: 8px; border: 1px solid var(--line); }
+  .scopePill { border: 0; background: transparent; color: var(--ink-secondary); height: 25px; padding: 0 9px; border-radius: 6px; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+  .scopePill.active { background: var(--bg-panel); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+
+  .sortBar { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+  .sortBar button { border: 1px solid var(--line); background: var(--bg-panel); color: var(--ink-secondary); height: 29px; padding: 0 4px; border-radius: 7px; font-size: 11.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+  .sortBar button:hover { border-color: var(--line-strong); color: var(--ink); }
+  .sortBar button.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); font-weight: 800; }
+
+  /* Ranking Rows */
+  .listMeta { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--ink-muted); }
+  .rows { display: flex; flex-direction: column; gap: 3px; }
+  .row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto auto auto; gap: 7px; align-items: center; padding: 7px 8px; border-radius: 8px; cursor: pointer; content-visibility: auto; contain-intrinsic-size: 36px; border: 1px solid transparent; }
+  .row:hover { background: var(--bg-subtle); }
+  .row.active { background: var(--brand-soft); border-color: var(--brand); }
+  .rankNum { font-size: 11px; font-weight: 800; color: var(--ink-muted); text-align: right; }
+  .rowName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 750; }
+  .rowName small { color: var(--ink-muted); font-weight: 600; font-size: 11.5px; margin-right: 4px; }
+  .row .price { color: var(--ink); font-weight: 800; font-size: 13px; white-space: nowrap; }
+  .rowDelta { font-size: 12px; font-weight: 700; white-space: nowrap; min-width: 50px; text-align: right; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .levelBadge { border: 1px solid var(--line-strong); border-radius: 999px; color: var(--ink-secondary); font-size: 11px; font-weight: 750; line-height: 1; padding: 3px 6px; background: var(--bg-subtle); white-space: nowrap; }
+  .levelBadge.inherited { border-color: #e4c17b; color: #785208; background: #fef7e0; }
+  [data-theme="dark"] .levelBadge.inherited { border-color: #855c0a; color: #fcd34d; background: rgba(245, 158, 11, 0.15); }
+  .levelBadge.district { border-color: #8cc9be; color: #0b5e52; background: #e8f8f5; }
+  [data-theme="dark"] .levelBadge.district { border-color: #115e59; color: #5eead4; background: rgba(20, 184, 166, 0.14); }
+  .levelBadge.supplement { border-color: #c3b2e6; color: #523580; background: #f3effc; }
+  [data-theme="dark"] .levelBadge.supplement { border-color: #5b21b6; color: #c4b5fd; background: rgba(139, 92, 246, 0.15); }
+  .rowBtns { display: inline-flex; gap: 3px; }
+  .iconAct { border: 1px solid var(--line); background: var(--bg-panel); color: var(--ink-secondary); height: 24px; padding: 0 6px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; }
+  .iconAct:hover { border-color: var(--brand); color: var(--brand-ink); }
+  .iconAct.inCompare { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+  .notes { border-top: 1px solid var(--line); padding-top: 12px; font-size: 12.5px; color: var(--ink-muted); line-height: 1.68; }
+
+  /* Comparison Drawer */
+  .compareDock { position: fixed; z-index: 15; left: 50%; bottom: 16px; transform: translateX(-50%); display: none; flex-direction: column; max-width: min(860px, calc(100vw - 24px)); width: max-content; }
+  .compareDock.hasItems { display: flex; }
+  .compareBar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; }
+  .compareSheet { display: none; padding: 14px 16px; margin-bottom: 8px; width: min(840px, calc(100vw - 24px)); overflow-x: auto; }
+  .compareSheet.open { display: block; }
+  .cmpTable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .cmpTable th, .cmpTable td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  .cmpTable th { color: var(--ink-muted); font-weight: 700; width: 110px; }
+  .cmpHeadCell { font-weight: 800; font-size: 13.5px; color: var(--ink); }
+
+  /* Tooltip & Toast */
+  .tooltip { position: fixed; z-index: 20; min-width: 210px; max-width: 290px; padding: 10px 12px; background: rgba(12, 25, 36, 0.95); color: #f1f7fb; border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28); pointer-events: none; display: none; font-size: 12px; line-height: 1.5; }
+  .tooltip strong { display: block; font-size: 14.5px; margin-bottom: 3px; color: #fff; }
+  .tooltip .tipMain { font-size: 13.5px; font-weight: 800; color: #7dd3fc; margin-bottom: 3px; }
+  .tooltip span { display: block; color: #cbdce7; }
+  .toast { position: fixed; z-index: 30; top: 18px; left: 50%; transform: translateX(-50%) translateY(-16px); opacity: 0; pointer-events: none; background: #0f222d; color: #fff; padding: 8px 16px; border-radius: 999px; font-size: 12.5px; font-weight: 700; box-shadow: 0 8px 24px rgba(0,0,0,0.22); transition: opacity 0.2s, transform 0.2s; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* Responsive Layout */
+  @media (max-width: 1120px) {
+    .app, body.sidebarCollapsed .app { height: auto; min-height: 100dvh; grid-template-columns: 1fr; overflow: visible; }
+    .mapShell { height: 68dvh; min-height: 460px; }
+    .side { height: auto; border-left: 0; border-top: 1px solid var(--line); opacity: 1 !important; pointer-events: auto !important; }
+    .sideScroll { overflow: visible; }
+    #toggleSidebar { display: none; }
+  }
+  @media (max-width: 1480px) {
+    .brandMeta { display: none; }
+  }
+  @media (max-width: 760px) {
+    .mapShell { height: 64dvh; min-height: 410px; }
+    .hudTopStack { left: 8px; right: 8px; top: 8px; gap: 5px; }
+    .hudTopBar { gap: 6px; }
+    .hudSubStack { padding-right: 44px; gap: 5px; }
+    .hudTopLeft { max-width: calc(100% - 48px); gap: 5px; }
+    .brandBlock { padding: 6px 10px; gap: 6px; }
+    .brandBlock h1 { font-size: 16px; }
+    .brandMeta { display: none; }
+    .metricTabs { overflow-x: auto; max-width: 100%; flex-wrap: nowrap; }
+    .metricTab { height: 27px; padding: 0 8px; font-size: 11.5px; }
+    .presetBar { overflow-x: auto; max-width: 100%; flex-wrap: nowrap; padding-bottom: 2px; }
+    .presetButton { height: 25px; padding: 0 8px; font-size: 11px; }
+    .toolbar { flex-direction: column; padding: 3px; gap: 3px; }
+    .toolBtn span.btnTxt, .toolSep, #exportPng { display: none; }
+    .toolBtn { width: 34px; height: 34px; padding: 0; }
+    .legend { left: 8px; bottom: 8px; padding: 7px 9px; max-width: calc(100% - 88px); }
+    .swatches { grid-template-columns: repeat(8, minmax(22px, 1fr)); gap: 2px; }
+    .swatchBtn { height: 12px; }
+    .legendLabels { grid-template-columns: repeat(4, 1fr); gap: 2px; font-size: 11px; }
+    .legendLabels span:nth-child(even):not(:last-child) { display: none; }
+    .legendFoot, .legendHint { display: none; }
+    .hudBottomRight { right: 8px; bottom: 8px; }
+    .scsInset { width: 62px; height: 80px; }
+    .scaleBadge { display: none; }
+    .sortBar { grid-template-columns: repeat(3, 1fr); }
+    .kpiStrip { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  }
 </style>
 </head>
 <body>
 <main class="app">
-  <section class="mapShell">
-    <header><h1>${esc(config.title)}</h1><p>${esc(config.subtitle)}</p><p>${esc(config.updateLine)}</p></header>
-    ${config.showPresetButtons === false ? "" : `<div class="presetBar">${(config.viewPresets || []).map(preset => `<button class="presetButton" data-preset="${esc(preset.id)}">${esc(preset.label)}</button>`).join("")}</div>`}
-    <div class="toolbar">${(config.navLinks || []).map(link => `<a class="mapNav${link.active ? " active" : ""}" href="${esc(link.href)}" data-short="${esc(link.shortLabel || link.label)}">${esc(link.label)}</a>`).join("")}<button id="zoomIn" title="放大地图" aria-label="放大地图">+</button><button id="zoomOut" title="缩小地图" aria-label="缩小地图">-</button><button id="reset" title="回到初始视图">重置视图</button><button id="toggleLabels" title="显示或隐藏城市、区县和房价标注">隐藏标注</button><button id="toggleTiles" title="叠加真实地图底图">真实底图</button></div>
-    <div class="labelControl mapControl"><label for="labelScale">标注大小</label><input id="labelScale" type="range" min="50" max="200" value="100"><span id="labelScaleValue">100%</span></div>
-    <div class="overlayControl mapControl"><label for="overlayOpacity">房价透明度</label><input id="overlayOpacity" type="range" min="0" max="100" value="${config.overlayOpacity ?? 60}"><span id="overlayOpacityValue">${config.overlayOpacity ?? 60}%</span></div>
-    <svg id="map" viewBox="${mapViewBox.x.toFixed(2)} ${mapViewBox.y.toFixed(2)} ${mapViewBox.w.toFixed(2)} ${mapViewBox.h.toFixed(2)}" preserveAspectRatio="xMidYMid meet">
+  <section class="mapShell" aria-label="全国房价交互地图">
+    <div class="hudTopStack">
+    <div class="hudTopBar">
+    <div class="hudTopLeft">
+      <div class="brandBlock hudCard">
+        <h1>${esc(config.title)}</h1>
+        <div class="brandMeta"><span class="liveDot"></span><span>${esc(config.updateLine)}</span></div>
+      </div>
+    </div>
+
+    <div class="hudTopRight">
+      <div class="toolbar hudCard">
+        <button class="toolBtn" id="zoomIn" title="放大地图 (+)" aria-label="放大地图"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button class="toolBtn" id="zoomOut" title="缩小地图 (-)" aria-label="缩小地图"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+        <button class="toolBtn" id="reset" title="回到初始全国视角 (R)" aria-label="重置视图"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg><span class="btnTxt">重置</span></button>
+        <div class="toolSep"></div>
+        <button class="toolBtn active" id="toggleLabels" title="显示或隐藏地图标注" aria-label="切换标注"><svg viewBox="0 0 24 24"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg><span class="btnTxt">标注</span></button>
+        <button class="toolBtn active" id="toggleFineMode" title="开启或关闭区县及核心街道/商圈板块细化下钻" aria-label="区县与街道细化"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="btnTxt">街道细化</span></button>
+        <button class="toolBtn" id="toggleTiles" title="叠加高德真实道路与地形底图" aria-label="真实底图"><svg viewBox="0 0 24 24"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg><span class="btnTxt">底图</span></button>
+        <button class="toolBtn" id="toggleTimeline" title="近12个月房价动态回放时光机" aria-label="时光轴回放"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg><span class="btnTxt">时光轴</span></button>
+        <button class="toolBtn" id="toggleRadius" title="15/30/50km 都市通勤圈与跨区价格洼地测距" aria-label="通勤圈测距"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg><span class="btnTxt">通勤圈</span></button>
+        <button class="toolBtn" id="toggleBudget" title="购房总预算与多因子智能选房评分" aria-label="智能选房"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 12 16.5 7.5"/><circle cx="12" cy="12" r="2"/></svg><span class="btnTxt">智能选房</span></button>
+        <button class="toolBtn" id="toggleDisplay" title="字号与透明度设置" aria-label="显示设置"><svg viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="18" y1="16" x2="22" y2="16"/></svg></button>
+        <button class="toolBtn" id="exportPng" title="导出当前地图高清PNG图片" aria-label="导出图片"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+        <button class="toolBtn" id="toggleTheme" title="切换深色/浅色主题" aria-label="切换主题"><svg id="themeIcon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+        <button class="toolBtn" id="toggleSidebar" title="收起或展开右侧数据工作台" aria-label="收放侧栏"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg></button>
+      </div>
+
+      <div id="displayPopover" class="popoverPanel hudCard">
+        <div class="popRow"><label for="labelScale">标注大小</label><input id="labelScale" type="range" min="60" max="190" value="100"><span id="labelScaleValue">100%</span></div>
+        <div class="popRow"><label for="overlayOpacity">图层不透明</label><input id="overlayOpacity" type="range" min="15" max="100" value="${config.overlayOpacity ?? 75}"><span id="overlayOpacityValue">${config.overlayOpacity ?? 75}%</span></div>
+      </div>
+
+      <div id="budgetPopover" class="budgetPanel hudCard">
+        <div class="budgetHead"><span>智能选房与预算雷达</span><button id="clearBudget" class="linkBtn" type="button">重置筛选</button></div>
+        <div class="modeSwitch" role="tablist">
+          <button type="button" class="modeSwitchBtn active" id="tabModeBudget">按总价预算</button>
+          <button type="button" class="modeSwitchBtn" id="tabModeSmart">按置业模型</button>
+        </div>
+        <div id="budgetPane" style="display:flex;flex-direction:column;gap:9px">
+          <div class="popRow"><label for="budgetTotal">购房总预算</label><input id="budgetTotal" type="range" min="40" max="1200" step="10" value="180"><span id="budgetTotalVal">180万</span></div>
+          <div class="popRow"><label for="budgetArea">目标面积</label><input id="budgetArea" type="range" min="50" max="180" step="5" value="90"><span id="budgetAreaVal">90㎡</span></div>
+        </div>
+        <div id="smartPane" style="display:none;flex-direction:column;gap:8px">
+          <div class="profileGrid">
+            <button type="button" class="profileBtn" data-profile="afford">刚需友好<small>低收入比优先</small></button>
+            <button type="button" class="profileBtn" data-profile="yield">高租售比<small>现金流回报</small></button>
+            <button type="button" class="profileBtn" data-profile="value">超跌寻优<small>深回撤+安全垫</small></button>
+          </div>
+        </div>
+        <div id="budgetSummary" class="budgetSummary">开启后将在地图高亮符合预算或高分置业区域，并在右侧排行优先展示。</div>
+      </div>
+
+      <div id="radiusPopover" class="radiusPanel hudCard">
+        <div class="budgetHead"><span>都市通勤圈与测距仪</span><button id="closeRadius" class="linkBtn" type="button">关闭</button></div>
+        <div id="radiusAnchorInfo" class="budgetSummary">点击地图任意区域即可设为通勤圆心，自动测算 15/30/50km 房价梯度与价格洼地。</div>
+        <div id="radiusRingStats" class="ringStatGrid"></div>
+        <div id="radiusArbitrage" class="arbList"></div>
+      </div>
+    </div>
+    </div>
+    <div class="hudSubStack">
+      <div class="metricTabs hudCard" role="tablist" aria-label="地图指标切换">
+        <button class="metricTab active" role="tab" aria-selected="true" data-metric="resale">二手挂牌</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="newPrice">新房均价</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="yoy">同比涨跌</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="rentYield">租金回报</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="priceToIncome">房价收入比</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="drawdown">峰值回撤</button>
+        <button class="metricTab" role="tab" aria-selected="false" data-metric="spread">一二手价差</button>
+      </div>
+      ${config.showPresetButtons === false ? "" : `<div class="presetBar" aria-label="重点城市群快速定位">${(config.viewPresets || []).map(preset => `<button class="presetButton" data-preset="${esc(preset.id)}">${esc(preset.shortLabel || preset.label)}</button>`).join("")}</div>`}
+    </div>
+    </div>
+
+    <svg id="map" viewBox="${mapViewBox.x.toFixed(1)} ${mapViewBox.y.toFixed(1)} ${mapViewBox.w.toFixed(1)} ${mapViewBox.h.toFixed(1)}" preserveAspectRatio="xMidYMid meet">
       <g id="viewport">
-        <g id="tileLayerA" class="tileBuffer active"></g><g id="tileLayerB" class="tileBuffer"></g>
-        <g id="priceOverlay"><g id="regionSeals">${regions.map(r => `<path class="regionSeal" d="${r.d}" fill="${r.fill}" stroke="${r.fill}"></path>`).join("")}</g><g id="regionLayer">${regions.map(r => `<path id="${r.id}" class="${regionClasses(r)}" ${regionAttrs(r)} d="${r.d}" fill="${r.fill}"></path>`).join("")}</g><g id="detailLayer"></g></g>
+        <g id="tileLayerA" class="tileBuffer active"></g>
+        <g id="tileLayerB" class="tileBuffer"></g>
+        <g id="priceOverlay">
+          <g id="regionLayer">${svgRegions.map(r => `<path id="${r.id}" class="${regionClasses(r)}" data-prov="${esc(r.province)}" fill-rule="evenodd" d="${r.d}" fill="${r.fill}"></path>`).join("")}</g>
+          <g id="detailLayer"></g>
+        </g>
         <g id="cityBoundaries">${cityBoundaries.map(r => `<path id="${r.id}" class="cityBoundary" d="${r.d}"></path>`).join("")}</g>
         <g id="detailBoundaries"></g>
-        <g id="highlightLayer"><path id="selectedPulse" class="highlightPath"></path><path id="selectedHighlight" class="highlightPath"></path><path id="hoverHighlight" class="highlightPath"></path></g>
+        <g id="commuteRingLayer"></g>
+        <g id="highlightLayer">
+          <path id="selectedPulse" class="highlightPath"></path>
+          <path id="selectedHighlight" class="highlightPath"></path>
+          <path id="hoverHighlight" class="highlightPath"></path>
+        </g>
         <g id="cityLabels">${cityLabels.map(item => `<text class="cityLabel" x="${item.x}" y="${item.y}" text-anchor="middle">${esc(item.label)}</text>`).join("")}</g>
-        <g id="detailLabels">${regions.filter(r => r.price).map(r => `<text class="detailLabel" x="${r.cx}" y="${r.cy}" data-min-scale="${r.labelMinScale}" text-anchor="middle">${detailLabelText(r)}</text>`).join("")}</g><g id="dynamicLabels"></g>
+        <g id="detailLabels">${svgRegions.filter(r => r.price).map(r => `<text class="detailLabel" data-id="${r.id}" x="${r.cx}" y="${r.cy}" data-min-scale="${r.labelMinScale}" text-anchor="middle">${detailLabelText(r)}</text>`).join("")}</g>
+        <g id="dynamicLabels"></g>
+        <g id="streetPlateLayer"></g>
+        <g id="communityPinLayer"></g>
       </g>
     </svg>
-    <div class="legend"><div class="legendTitle">住宅挂牌价（万/㎡）</div><div class="swatches">${colors.map(c => `<span class="swatch" style="background:${c}"></span>`).join("")}</div><div class="legendLabels">${colors.map((_, i) => `<span>${legendLabel(i, breaks, colors)}</span>`).join("")}</div></div>
-    <div class="tileAttribution">地图 © 高德地图</div>
+
+    <div class="legend hudCard">
+      <div class="legendHead">
+        <span id="legendTitle" class="legendTitle">二手住宅挂牌均价（万/㎡）</span>
+        <span class="legendHint"><span id="legendFilterTip">点击色块筛选区间</span><button id="clearBinFilter" class="linkBtn" style="display:none" type="button">重置区间</button></span>
+      </div>
+      <div id="legendDistBar" class="legendDistBar" title="当前各色阶样本占比分布"></div>
+      <div id="swatches" class="swatches">${colors.map((c, i) => `<button type="button" class="swatchBtn" data-bin="${i}" style="background:${c}" aria-label="筛选区间 ${legendLabel(i, breaks, colors)}"></button>`).join("")}</div>
+      <div id="legendLabels" class="legendLabels">${colors.map((_, i) => `<span>${legendLabel(i, breaks, colors)}</span>`).join("")}</div>
+      <div class="legendFoot">
+        <span>实线：城市/区县实测</span>
+        <span><i class="dashSample"></i>虚线：区县沿用市均底色</span>
+      </div>
+    </div>
+
+    <div class="hudBottomRight">
+      <div id="scsInset" class="scsInset hudCard" title="点击定位南海诸岛 / 再次点击返回全国">
+        <svg viewBox="${scsViewBox}" preserveAspectRatio="xMidYMid meet">
+          ${scsOutlines.map(o => `<path d="${o.d}"></path>`).join("")}
+        </svg>
+        <span class="scsLabel">南海诸岛</span>
+      </div>
+      <div id="scaleBadge" class="scaleBadge hudCard">城市级视图 · 放大自动加载区县</div>
+      <div class="tileAttribution hudCard">底图 © 高德地图</div>
+    </div>
+
+    <div id="timelineDock" class="timelineDock hudCard" aria-label="近12个月房价时光机">
+      <button type="button" id="tlPlayBtn" class="tlPlayBtn" title="自动播放或暂停月度演变" aria-label="播放"><svg id="tlPlayIcon" viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4"/></svg></button>
+      <span id="tlMonthLabel" class="tlMonth num">2026-10</span>
+      <input id="tlSlider" class="tlSlider" type="range" min="0" max="11" step="1" value="11" aria-label="选择历史月份">
+      <button type="button" id="tlModeBtn" class="miniBtn" title="切换显示当月绝对均价或较首月累计涨跌幅">当月均价</button>
+      <button type="button" id="tlCloseBtn" class="linkBtn" title="退出时光轴回放">退出</button>
+    </div>
   </section>
-  <aside class="side">
-    <h2>${esc(config.sideTitle || "区域数据")}</h2>
-    <p class="caption">${esc(config.caption || "")}</p>
-    <input id="search" class="search" placeholder="搜索城市或区县">
-    <div class="sortBar"><button data-sort="priceDesc" class="active">价格高</button><button data-sort="priceAsc">价格低</button><button data-sort="momDesc">涨幅高</button><button data-sort="momAsc">跌幅高</button><button data-sort="city">按城市</button><button data-sort="name">按名称</button></div>
-    <div id="selected" class="selected"><div class="name">点击或悬停地图区域</div><div class="meta">可查看房价、环比和数据口径。</div></div>
-    <div id="rows" class="rows"></div>
-    <div class="notes">${config.notesHtml || ""}</div>
+
+  <aside class="side" aria-label="区域房价数据与分析">
+    <div class="sideScroll">
+      <div class="kpiWrap">
+        <div class="kpiHeadRow">
+          <span id="kpiScopeTitle">全国城市基准统计</span>
+          <button type="button" id="toggleKpiViewport" class="linkBtn" title="切换随地图视野实时联动或锁定全国总览">视野联动: 开</button>
+        </div>
+        <div class="kpiStrip" id="kpiStrip">
+          <div class="kpiItem"><div class="kpiLabel">中位单价</div><div class="kpiVal" id="kpiMedian">--</div></div>
+          <div class="kpiItem"><div class="kpiLabel">中位租金回报</div><div class="kpiVal" id="kpiYield">--</div></div>
+          <div class="kpiItem"><div class="kpiLabel">中位收入比</div><div class="kpiVal" id="kpiPti">--</div></div>
+          <div class="kpiItem"><div class="kpiLabel">统计样本</div><div class="kpiVal" id="kpiCount">--</div></div>
+        </div>
+      </div>
+
+      <div id="selected" class="dossier"></div>
+
+      <div class="filterBlock">
+        <div class="searchRow">
+          <div class="searchWrap">
+            <input id="search" class="search" type="search" placeholder="搜索省、市、区县或街道商圈 (如 后海 / 陆家嘴 / 珠江新城)" aria-label="搜索城市、区县或街道商圈">
+            <button id="searchClear" class="searchClear" type="button" aria-label="清空搜索">×</button>
+          </div>
+          <select id="provFilter" class="provSelect" aria-label="按省份筛选"><option value="">全部省份</option></select>
+        </div>
+        <div class="subFilterRow">
+          <div class="scopePills" role="group" aria-label="层级筛选">
+            <button type="button" class="scopePill active" data-scope="all">全部层级</button>
+            <button type="button" class="scopePill" data-scope="city">仅看城市</button>
+            <button type="button" class="scopePill" data-scope="district">独立区县</button>
+            <button type="button" class="scopePill" data-scope="fav" id="favScopeBtn">已收藏</button>
+          </div>
+          <button type="button" id="exportCsv" class="miniBtn" title="导出当前筛选列表为CSV表格">导出 CSV</button>
+        </div>
+        <div class="sortBar">
+          <button type="button" data-sort="metricDesc" class="active">数值高</button>
+          <button type="button" data-sort="metricAsc">数值低</button>
+          <button type="button" data-sort="chgDesc">涨幅高</button>
+          <button type="button" data-sort="chgAsc">跌幅大</button>
+          <button type="button" data-sort="yieldDesc">回报高</button>
+          <button type="button" data-sort="ptiAsc">收入比低</button>
+        </div>
+        <div class="listMeta"><span id="listSummary">正在加载样本...</span><span>点击行查看详情 · 定位飞往</span></div>
+      </div>
+
+      <div id="rows" class="rows"></div>
+      <div class="notes">${config.notesHtml || ""}</div>
+    </div>
   </aside>
 </main>
+
+<div id="compareDock" class="compareDock">
+  <div id="compareSheet" class="compareSheet hudCard"></div>
+  <div class="compareBar hudCard">
+    <strong id="compareCount">对比篮 (0/4)</strong>
+    <button type="button" id="toggleCompareSheet" class="miniBtn active">展开PK对比</button>
+    <button type="button" id="clearCompare" class="linkBtn">清空</button>
+  </div>
+</div>
+
 <div id="tooltip" class="tooltip"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
 <script>
-const regions=${JSON.stringify(regions)};
-const viewPresets=${JSON.stringify(config.viewPresets || [])};
-const detailSources=${JSON.stringify(config.detailSources || [])};
-let places=[...regions];
-let placeById=new Map(places.map(place=>[place.id,place]));
-const svg=document.getElementById('map'),viewport=document.getElementById('viewport'),mapShell=document.querySelector('.mapShell');
-const tileBuffers=[document.getElementById('tileLayerA'),document.getElementById('tileLayerB')];
-const detailLayer=document.getElementById('detailLayer'),detailBoundaries=document.getElementById('detailBoundaries'),dynamicLabels=document.getElementById('dynamicLabels');
-const overlayOpacityInput=document.getElementById('overlayOpacity'),overlayOpacityValue=document.getElementById('overlayOpacityValue');
-const labelScaleInput=document.getElementById('labelScale'),labelScaleValue=document.getElementById('labelScaleValue');
-const toggleLabelsButton=document.getElementById('toggleLabels'),toggleTilesButton=document.getElementById('toggleTiles'),resetButton=document.getElementById('reset');
-const hoverHighlight=document.getElementById('hoverHighlight'),selectedHighlight=document.getElementById('selectedHighlight'),selectedPulse=document.getElementById('selectedPulse');
-const tooltip=document.getElementById('tooltip'),selected=document.getElementById('selected'),rows=document.getElementById('rows'),search=document.getElementById('search'),cityLabels=document.getElementById('cityLabels');
-let regionEls=Array.from(document.querySelectorAll('.region'));
-let labelEls=Array.from(document.querySelectorAll('.detailLabel,.cityLabel')).map(el=>({el,x:Number(el.getAttribute('x')),y:Number(el.getAttribute('y'))}));
-let detailLabelEls=Array.from(document.querySelectorAll('.detailLabel')).map(el=>({el,minScale:Number(el.dataset.minScale||2.2)}));
-const sortButtons=Array.from(document.querySelectorAll('.sortBar button')),collator=new Intl.Collator('zh-Hans-CN'),labelScaleBase=1.5;
-let state={scale:1,x:0,y:0},dragging=false,last=null,activePointers=new Map(),pinch=null,tapCandidate=null,activeId=null,labelsVisible=true,sortMode='priceDesc',tilesVisible=false,overlayOpacity=Number(overlayOpacityInput.value)/100,labelScale=Number(labelScaleInput.value)/100*labelScaleBase,lastTileKey='',pendingTileKey='',tileLoadToken=0,activeTileBuffer=0,rowEls=[],renderFrame=0,renderForceLabels=false,renderImmediateTiles=false,renderDeferHeavy=false,lastRenderedScale=0,tileUpdateTimer=0,labelSettleTimer=0,viewportSettleTimer=0,tooltipPlaceId='',detailDatasetEls=[],viewMetricCache=null,moveAnimationToken=0;
-const loadedDetailSources=new Set(),loadingDetailSources=new Set();
-const minScale=.7,maxScale=${Number(config.maxScale || 60)},maxDetailLoadsPerPass=${Number(config.maxDetailLoadsPerPass || 3)},projection=${JSON.stringify({ minX: projection.minX, minY: projection.minY, maxX: projection.maxX, maxY: projection.maxY, scale: projection.scale, ox: projection.ox, oy: projection.oy })},mapBounds=${JSON.stringify(projection.projectedMapBounds)};
-function fmt(value){return Number(value).toLocaleString('zh-CN')} function fmtWan(value){return Number((Number(value)/10000).toFixed(1)).toLocaleString('zh-CN',{maximumFractionDigits:1})+'万'} function escapeHtml(value){return String(value??'').replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]))}
-function isInherited(r){return !!(r&& (r.inherited||r.dataLevel==='city-inherited'||String(r.quality||'').includes('用于区县底色')))} function isSupplement(r){return !!(r&&(r.dataLevel==='district-supplement'||(r.supplemental&&!isInherited(r))))} function marketText(r){if(!r?.price)return '';if(r.priceType==='new')return '新房';if(r.priceType==='new-estimated')return '新房估算';if(r.priceType==='resale')return '挂牌/二手';if(r.priceType==='resale-estimated')return '挂牌估算';return '房价'} function levelText(r){if(!r?.price)return '';if(isInherited(r))return marketText(r)+'市均';if(r.priceType==='new'||r.priceType==='new-estimated'||r.priceType==='resale'||r.priceType==='resale-estimated')return marketText(r);if(isSupplement(r))return '补充数据';if(r.dataLevel==='district'||String(r.quality||'').includes('区县'))return '区县数据';if(r.dataLevel==='city')return '城市数据';return '公开数据'} function levelClass(r){return isInherited(r)?'levelBadge inherited':(r.priceType==='new'?'levelBadge new':(r.priceType==='new-estimated'||r.priceType==='resale-estimated'||isSupplement(r)?'levelBadge supplement':(r.dataLevel==='district'||String(r.quality||'').includes('区县')?'levelBadge district':'levelBadge')))} function labelText(r){return escapeHtml(r.label)+' '+fmtWan(r.price)+(r.priceType==='resale-estimated'?' 估':'')+(isInherited(r)?' 市均':'')} function referenceLine(r){const parts=[];if(r.resalePrice)parts.push('挂牌/二手'+(r.resalePriceEstimated?'估算':'')+' '+fmt(r.resalePrice)+' 元/㎡');if(r.newPrice)parts.push('新房'+(r.newPriceEstimated?'估算':'')+' '+fmt(r.newPrice)+' 元/㎡');return parts.join(' · ')} function sourceLine(r){const estimate=(r.priceType==='resale-estimated'||r.priceType==='new-estimated'||r.newPriceEstimated||r.resalePriceEstimated)?r.estimateBasis:'';return [levelText(r),r.quality,r.source,estimate].filter(Boolean).join(' · ')}
-function applyOverlayOpacity(){document.documentElement.style.setProperty('--overlay-opacity',overlayOpacity.toFixed(2));overlayOpacityValue.textContent=Math.round(overlayOpacity*100)+'%'} function applyLabelScale(){document.documentElement.style.setProperty('--label-scale',labelScale.toFixed(2));labelScaleValue.textContent=Math.round(labelScale/labelScaleBase*100)+'%'} function applyMapLabelVisibility(){cityLabels.style.display=labelsVisible&&state.scale<2.55?'':'none';detailLabelEls.forEach(label=>label.el.style.display=labelsVisible&&state.scale>=label.minScale?'block':'none');toggleLabelsButton.textContent=labelsVisible?'隐藏标注':'显示标注';toggleLabelsButton.classList.toggle('active',labelsVisible)}
-function viewMetrics(){if(viewMetricCache)return viewMetricCache;const rect=svg.getBoundingClientRect(),box=svg.viewBox.baseVal,scale=Math.min(rect.width/box.width,rect.height/box.height)||1,drawnW=box.width*scale,drawnH=box.height*scale;return viewMetricCache={box,scale,offsetX:rect.left+(rect.width-drawnW)/2,offsetY:rect.top+(rect.height-drawnH)/2}} function clientToSvg(clientX,clientY){const m=viewMetrics();return{x:m.box.x+(clientX-m.offsetX)/m.scale,y:m.box.y+(clientY-m.offsetY)/m.scale}} function clientDeltaToSvg(dx,dy){const m=viewMetrics();return{x:dx/m.scale,y:dy/m.scale}} function svgToContent(point){return{x:(point.x-state.x)/state.scale,y:(point.y-state.y)/state.scale}}
-function svgVisibleBox(){const box=svg.viewBox.baseVal;return{minX:box.x,minY:box.y,maxX:box.x+box.width,maxY:box.y+box.height}}
-function svgCenterPoint(){const box=svg.viewBox.baseVal;return{x:box.x+box.width/2,y:box.y+box.height/2}}
-function invalidateViewMetrics(){viewMetricCache=null}
-function clampValue(value,min,max){return Math.max(min,Math.min(max,value))} function clampPan(){const view=svgVisibleBox(),viewW=view.maxX-view.minX,viewH=view.maxY-view.minY,padX=Math.min(90,viewW*.16),padY=Math.min(90,viewH*.16),mapW=(mapBounds.maxX-mapBounds.minX)*state.scale,mapH=(mapBounds.maxY-mapBounds.minY)*state.scale,centerX=(view.minX+view.maxX-(mapBounds.minX+mapBounds.maxX)*state.scale)/2,centerY=(view.minY+view.maxY-(mapBounds.minY+mapBounds.maxY)*state.scale)/2;state.x=mapW<=viewW-padX*2?centerX:clampValue(state.x,view.maxX-padX-mapBounds.maxX*state.scale,view.minX+padX-mapBounds.minX*state.scale);state.y=mapH<=viewH-padY*2?centerY:clampValue(state.y,view.maxY-padY-mapBounds.maxY*state.scale,view.minY+padY-mapBounds.minY*state.scale)}
-function mercatorToLat(y){return (Math.atan(Math.exp(y*Math.PI/180))*2-Math.PI/2)*180/Math.PI} function svgToLonLat(x,y){const lon=(x-projection.ox)/projection.scale+projection.minX,mercY=projection.minY+(projection.oy-y)/projection.scale;return[lon,mercatorToLat(mercY)]} function projectLonLat(lon,lat){const rad=lat*Math.PI/180,mercY=Math.log(Math.tan(Math.PI/4+rad/2))*180/Math.PI;return{x:projection.ox+(lon-projection.minX)*projection.scale,y:projection.oy-(mercY-projection.minY)*projection.scale}} function lonToTileX(lon,z){return Math.floor((lon+180)/360*Math.pow(2,z))} function latToTileY(lat,z){const rad=lat*Math.PI/180;return Math.floor((1-Math.log(Math.tan(rad)+1/Math.cos(rad))/Math.PI)/2*Math.pow(2,z))} function tileXToLon(x,z){return x/Math.pow(2,z)*360-180} function tileYToLat(y,z){const n=Math.PI-2*Math.PI*y/Math.pow(2,z);return Math.atan(Math.sinh(n))*180/Math.PI} function tileUrl(x,y,z){const sub=((x+y)%4)+1;return 'https://webrd0'+sub+'.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x='+x+'&y='+y+'&z='+z}
-function clearTiles(){tileLoadToken+=1;lastTileKey='';pendingTileKey='';tileBuffers.forEach((b,i)=>{b.innerHTML='';b.classList.toggle('active',i===activeTileBuffer)})} function swapTileBuffer(nextIndex,tileKey,markup){const next=tileBuffers[nextIndex],prev=tileBuffers[activeTileBuffer];next.innerHTML=markup;next.classList.add('active');prev.classList.remove('active');activeTileBuffer=nextIndex;lastTileKey=tileKey;pendingTileKey='';setTimeout(()=>{if(tileBuffers[activeTileBuffer]!==prev)prev.innerHTML=''},180)} function preloadTileUrls(urls,token,onReady){if(!urls.length){onReady();return}let done=false,loaded=0;const finish=()=>{if(done||token!==tileLoadToken)return;loaded+=1;if(loaded>=urls.length){done=true;onReady()}};urls.forEach(url=>{const image=new Image();image.decoding='async';image.onload=finish;image.onerror=finish;image.src=url});setTimeout(()=>{if(done||token!==tileLoadToken)return;done=true;onReady()},1800)}
-function visibleContentBounds(){const view=svgVisibleBox();const corners=[{x:view.minX,y:view.minY},{x:view.maxX,y:view.minY},{x:view.maxX,y:view.maxY},{x:view.minX,y:view.maxY}].map(svgToContent);return{minX:Math.min(...corners.map(p=>p.x)),maxX:Math.max(...corners.map(p=>p.x)),minY:Math.min(...corners.map(p=>p.y)),maxY:Math.max(...corners.map(p=>p.y))}}
-function intersects(a,b){return a.minX<=b.maxX&&a.maxX>=b.minX&&a.minY<=b.maxY&&a.maxY>=b.minY}
-function updateTiles(){if(!tilesVisible){if(lastTileKey||pendingTileKey)clearTiles();return}const b=visibleContentBounds(),nw=svgToLonLat(b.minX,b.minY),se=svgToLonLat(b.maxX,b.maxY),west=Math.max(-180,Math.min(nw[0],se[0])),east=Math.min(180,Math.max(nw[0],se[0])),north=Math.max(-85,Math.min(85,Math.max(nw[1],se[1]))),south=Math.max(-85,Math.min(85,Math.min(nw[1],se[1])));let z=Math.max(8,Math.min(18,Math.round(9.5+Math.log2(state.scale)))),x0=lonToTileX(west,z),x1=lonToTileX(east,z),y0=latToTileY(north,z),y1=latToTileY(south,z);while((x1-x0+1)*(y1-y0+1)>72&&z>7){z-=1;x0=lonToTileX(west,z);x1=lonToTileX(east,z);y0=latToTileY(north,z);y1=latToTileY(south,z)}const n=Math.pow(2,z),xStart=Math.max(0,x0-1),xEnd=Math.min(n-1,x1+1),yStart=Math.max(0,y0-1),yEnd=Math.min(n-1,y1+1),tileKey=[z,xStart,xEnd,yStart,yEnd].join(':');if(tileKey===lastTileKey||tileKey===pendingTileKey)return;pendingTileKey=tileKey;const token=++tileLoadToken,tiles=[],urls=[];for(let x=xStart;x<=xEnd;x++){for(let y=yStart;y<=yEnd;y++){const p1=projectLonLat(tileXToLon(x,z),tileYToLat(y,z)),p2=projectLonLat(tileXToLon(x+1,z),tileYToLat(y+1,z)),url=tileUrl(x,y,z);urls.push(url);tiles.push('<image class="tileImage" href="'+url+'" x="'+p1.x+'" y="'+p1.y+'" width="'+(p2.x-p1.x)+'" height="'+(p2.y-p1.y)+'" preserveAspectRatio="none"></image>')}}const markup=tiles.join(''),nextIndex=activeTileBuffer?0:1;preloadTileUrls(urls,token,()=>{if(token!==tileLoadToken||pendingTileKey!==tileKey||!tilesVisible)return;requestAnimationFrame(()=>swapTileBuffer(nextIndex,tileKey,markup))})}
-function requestTileUpdate(immediate=false){if(tileUpdateTimer){clearTimeout(tileUpdateTimer);tileUpdateTimer=0}if(!tilesVisible||immediate){updateTiles();return}tileUpdateTimer=setTimeout(()=>{tileUpdateTimer=0;updateTiles()},90)}
-function applyTransform(options={}){clampPan();viewport.setAttribute('transform','translate('+state.x+' '+state.y+') scale('+state.scale+')');if(options.deferHeavy)return;const scaleChanged=!!options.forceLabels||!lastRenderedScale||Math.abs(Math.log(state.scale/lastRenderedScale))>.045;if(scaleChanged){const inverse=1/state.scale;labelEls.forEach(label=>label.el.setAttribute('transform','translate('+label.x+' '+label.y+') scale('+inverse+') translate('+-label.x+' '+-label.y+')'));applyMapLabelVisibility();lastRenderedScale=state.scale}updateDetailVisibility();if(!options.skipLoadDetails)maybeLoadDetails();if(tilesVisible||lastTileKey)requestTileUpdate(!!options.immediateTiles)}
-function scheduleTransform(options={}){renderForceLabels=renderForceLabels||!!options.forceLabels;renderImmediateTiles=renderImmediateTiles||!!options.immediateTiles;renderDeferHeavy=renderDeferHeavy||!!options.deferHeavy;if(renderFrame)return;renderFrame=requestAnimationFrame(()=>{renderFrame=0;const forceLabels=renderForceLabels,immediateTiles=renderImmediateTiles,deferHeavy=renderDeferHeavy&&!renderForceLabels&&!renderImmediateTiles;renderForceLabels=false;renderImmediateTiles=false;renderDeferHeavy=false;applyTransform({forceLabels,immediateTiles,deferHeavy})})}
-function queueLabelSettle(){if(labelSettleTimer)clearTimeout(labelSettleTimer);labelSettleTimer=setTimeout(()=>{labelSettleTimer=0;scheduleTransform({forceLabels:true})},120)}
-function setMoving(active){mapShell.classList.toggle('isMoving',!!active)}
-function finishViewportMove(){if(viewportSettleTimer){clearTimeout(viewportSettleTimer);viewportSettleTimer=0}setMoving(false);scheduleTransform({forceLabels:true,immediateTiles:true})}
-function queueViewportSettle(delay=140){setMoving(true);if(viewportSettleTimer)clearTimeout(viewportSettleTimer);viewportSettleTimer=setTimeout(()=>{viewportSettleTimer=0;finishViewportMove()},delay)}
-function zoom(factor,clientX,clientY){const rect=svg.getBoundingClientRect(),anchor=clientToSvg(clientX??(rect.left+rect.width/2),clientY??(rect.top+rect.height/2)),content=svgToContent(anchor),nextScale=Math.max(minScale,Math.min(maxScale,state.scale*factor));state.x=anchor.x-content.x*nextScale;state.y=anchor.y-content.y*nextScale;state.scale=nextScale;scheduleTransform({deferHeavy:true});queueLabelSettle();queueViewportSettle()}
-function cancelMoveAnimation(){moveAnimationToken+=1} function animateToState(target,duration=620){const token=++moveAnimationToken,start={scale:state.scale,x:state.x,y:state.y},startTime=performance.now(),ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;setMoving(true);function step(now){if(token!==moveAnimationToken)return;const p=Math.min(1,(now-startTime)/duration),e=ease(p);state.scale=start.scale+(target.scale-start.scale)*e;state.x=start.x+(target.x-start.x)*e;state.y=start.y+(target.y-start.y)*e;scheduleTransform({deferHeavy:p<1});if(p<1)requestAnimationFrame(step);else{state.scale=target.scale;state.x=target.x;state.y=target.y;finishViewportMove()}}requestAnimationFrame(step)}
-function animateFocusContentPoint(x,y,scale){const center=svgCenterPoint(),targetScale=Math.max(minScale,Math.min(maxScale,scale));animateToState({scale:targetScale,x:center.x-x*targetScale,y:center.y-y*targetScale})}
-function setHighlightPath(el,r){if(r&&r.d)el.setAttribute('d',r.d);else el.removeAttribute('d')} function setHoverHighlight(r){if(!r||r.id===activeId){setHighlightPath(hoverHighlight,null);return}setHighlightPath(hoverHighlight,r)} function setSelectedHighlight(r){setHighlightPath(selectedHighlight,r);setHighlightPath(selectedPulse,r)}
-function bindRegionElement(el){const r=placeById.get(el.id);if(!r)return;el.addEventListener('mousemove',event=>{setHoverHighlight(r);showTip(event,r)});el.addEventListener('mouseleave',()=>{setHoverHighlight(null);hideTip()})}
-function registerDetailLabels(container){Array.from(container.querySelectorAll('.detailLabel')).forEach(el=>{labelEls.push({el,x:Number(el.getAttribute('x')),y:Number(el.getAttribute('y'))});detailLabelEls.push({el,minScale:Number(el.dataset.minScale||2.2)})})}
-function setDatasetBounds(el,source){el.dataset.minScale=String(source.minScale||3);if(source.bounds){el.dataset.minX=source.bounds.minX;el.dataset.minY=source.bounds.minY;el.dataset.maxX=source.bounds.maxX;el.dataset.maxY=source.bounds.maxY}}
-function addDetailDataset(source,payload){if(document.getElementById('detail-'+source.id))return;const group=document.createElementNS('http://www.w3.org/2000/svg','g');group.id='detail-'+source.id;group.classList.add('detailDataset');setDatasetBounds(group,source);group.innerHTML='<g>'+payload.regions.map(r=>'<path id="'+r.id+'" class="region detailRegion'+(isInherited(r)?' inheritedRegion':'')+'" data-city="'+escapeHtml(r.city)+'" data-name="'+escapeHtml(r.name)+'" data-level="'+escapeHtml(r.dataLevel||'')+'" data-inherited="'+(isInherited(r)?'true':'false')+'" d="'+r.d+'" fill="'+r.fill+'"></path>').join('')+'</g>';detailLayer.appendChild(group);const boundary=document.createElementNS('http://www.w3.org/2000/svg','g');boundary.id='detail-boundary-'+source.id;boundary.classList.add('detailDataset');setDatasetBounds(boundary,source);boundary.innerHTML=payload.outlines.map(r=>'<path class="cityBoundary" d="'+r.d+'"></path>').join('');detailBoundaries.appendChild(boundary);const labels=document.createElementNS('http://www.w3.org/2000/svg','g');labels.id='detail-label-'+source.id;labels.classList.add('detailDataset');setDatasetBounds(labels,source);labels.innerHTML=payload.regions.filter(r=>r.price).map(r=>'<text class="detailLabel" x="'+r.cx+'" y="'+r.cy+'" data-min-scale="'+Math.max(r.labelMinScale,source.labelScale||3.2)+'" text-anchor="middle">'+labelText(r)+'</text>').join('');dynamicLabels.appendChild(labels);detailDatasetEls.push(group,boundary,labels);payload.regions.forEach(r=>{places.push(r);placeById.set(r.id,r)});const newRegionEls=Array.from(group.querySelectorAll('.region'));newRegionEls.forEach(bindRegionElement);regionEls=regionEls.concat(newRegionEls);registerDetailLabels(labels);if(mapShell.classList.contains('isMoving')){group.classList.add('hidden');boundary.classList.add('hidden');labels.classList.add('hidden');renderRows(search.value);return}updateDetailVisibility();renderRows(search.value);applyTransform({forceLabels:true,skipLoadDetails:true})}
-async function loadDetailSource(source){if(loadedDetailSources.has(source.id)||loadingDetailSources.has(source.id))return;loadingDetailSources.add(source.id);try{const response=await fetch(source.url);if(!response.ok)throw new Error(response.status);const payload=await response.json();loadedDetailSources.add(source.id);addDetailDataset(source,payload)}catch(error){console.warn('detail layer failed',source.id,error)}finally{loadingDetailSources.delete(source.id)}}
-function expandedBounds(bounds,ratio=.35){const w=bounds.maxX-bounds.minX,h=bounds.maxY-bounds.minY;return{minX:bounds.minX-w*ratio,minY:bounds.minY-h*ratio,maxX:bounds.maxX+w*ratio,maxY:bounds.maxY+h*ratio}}
-function datasetVisible(el,bounds){if(state.scale<Number(el.dataset.minScale||3))return false;if(!el.dataset.minX)return true;const sourceBounds={minX:Number(el.dataset.minX),minY:Number(el.dataset.minY),maxX:Number(el.dataset.maxX),maxY:Number(el.dataset.maxY)};return intersects(expandedBounds(bounds,.25),sourceBounds)}
-function updateDetailVisibility(){const bounds=visibleContentBounds();detailDatasetEls.forEach(el=>el.classList.toggle('hidden',!datasetVisible(el,bounds)))}
-function sourceDistance(source,bounds){if(!source.bounds)return 0;const cx=(bounds.minX+bounds.maxX)/2,cy=(bounds.minY+bounds.maxY)/2,sx=(source.bounds.minX+source.bounds.maxX)/2,sy=(source.bounds.minY+source.bounds.maxY)/2;return Math.hypot(cx-sx,cy-sy)}
-function maybeLoadDetails(){if(!detailSources.length)return;const bounds=visibleContentBounds();detailSources.filter(source=>!loadedDetailSources.has(source.id)&&!loadingDetailSources.has(source.id)&&state.scale>=source.minScale&&(!source.bounds||intersects(expandedBounds(bounds,.12),source.bounds))).sort((a,b)=>sourceDistance(a,bounds)-sourceDistance(b,bounds)).slice(0,maxDetailLoadsPerPass).forEach(loadDetailSource)}
-function focusContentPoint(x,y,scale){const center=svgCenterPoint();state.scale=Math.max(minScale,Math.min(maxScale,scale));state.x=center.x-x*state.scale;state.y=center.y-y*state.scale;applyTransform({forceLabels:true,immediateTiles:true})}
-function focusLonLat(lon,lat,scale){const p=projectLonLat(lon,lat);focusContentPoint(p.x,p.y,scale)}
-function applyPreset(id){const preset=viewPresets.find(item=>item.id===id);if(!preset)return;document.querySelectorAll('.presetButton').forEach(button=>button.classList.toggle('active',button.dataset.preset===id));focusLonLat(preset.center[0],preset.center[1],preset.scale||3.5)}
-function pointerDistance(a,b){return Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)} function pointerMidpoint(a,b){return{clientX:(a.clientX+b.clientX)/2,clientY:(a.clientY+b.clientY)/2}} function beginPinch(){const points=[...activePointers.values()];if(points.length<2){pinch=null;return}tapCandidate=null;const center=pointerMidpoint(points[0],points[1]),anchor=clientToSvg(center.clientX,center.clientY);pinch={distance:Math.max(1,pointerDistance(points[0],points[1])),scale:state.scale,content:svgToContent(anchor)}}
-function endPointer(event){const candidate=tapCandidate&&tapCandidate.pointerId===event.pointerId?tapCandidate:null,isTap=!!(candidate&&candidate.id&&activePointers.size===1&&!candidate.moved&&Math.hypot(event.clientX-candidate.clientX,event.clientY-candidate.clientY)<=7);if(activePointers.has(event.pointerId)){activePointers.delete(event.pointerId);try{svg.releasePointerCapture(event.pointerId)}catch(_){}}if(activePointers.size===1){const [remaining]=activePointers.values();last={clientX:remaining.clientX,clientY:remaining.clientY};dragging=true;pinch=null}else{dragging=false;pinch=null;svg.classList.remove('dragging');finishViewportMove()}if(candidate){tapCandidate=null;if(isTap)selectRegion(candidate.id)}}
-function selectRegion(id,center=false){activeId=id;hideTip();regionEls.forEach(el=>el.classList.toggle('active',el.id===id));rowEls.forEach(el=>el.classList.toggle('active',el.dataset.id===id));const r=placeById.get(id);if(!r)return;setSelectedHighlight(r);setHoverHighlight(null);const refs=referenceLine(r);selected.innerHTML='<div class="name">'+r.city+' '+r.name+'</div>'+(r.price?'<div class="price">'+fmt(r.price)+' 元/㎡</div><div class="meta">'+marketText(r)+' · 约 '+fmtWan(r.price)+'/㎡ · 环比 '+r.mom+'</div>'+(refs?'<div class="meta">'+refs+'</div>':'')+'<div class="meta">'+sourceLine(r)+'</div>':'<div class="meta">暂无单列房价数据。</div>');if(center){animateFocusContentPoint(r.cx,r.cy,Math.max(state.scale,3.2))}}
-function locateRegion(id){const r=placeById.get(id);if(!r)return;selectRegion(id,false);animateFocusContentPoint(r.cx,r.cy,Math.max(state.scale,3.2))}
-function showTip(event,r){tooltip.style.display='block';tooltip.style.left=event.clientX+'px';tooltip.style.top=event.clientY+'px';if(tooltipPlaceId!==r.id){tooltipPlaceId=r.id;const refs=referenceLine(r);tooltip.innerHTML='<strong>'+r.city+' '+r.name+'</strong>'+(r.price?'<span>'+marketText(r)+' '+fmt(r.price)+' 元/㎡ · 约 '+fmtWan(r.price)+' · 环比 '+r.mom+'</span>'+(refs?'<span>'+refs+'</span>':'')+'<span>'+sourceLine(r)+'</span>':'<span>暂无单列房价数据</span>')}} function hideTip(){tooltip.style.display='none';tooltipPlaceId=''}
-regionEls.forEach(bindRegionElement);
-svg.addEventListener('wheel',event=>{event.preventDefault();cancelMoveAnimation();invalidateViewMetrics();zoom(event.deltaY<0?1.16:.86,event.clientX,event.clientY)},{passive:false});
-svg.addEventListener('pointerdown',event=>{if(event.pointerType==='mouse'&&event.button!==0)return;event.preventDefault();cancelMoveAnimation();invalidateViewMetrics();setMoving(true);hideTip();if(svg.setPointerCapture)svg.setPointerCapture(event.pointerId);const target=event.target.closest?event.target.closest('.region'):null;tapCandidate=target?{id:target.id,pointerId:event.pointerId,clientX:event.clientX,clientY:event.clientY,moved:false}:null;activePointers.set(event.pointerId,{clientX:event.clientX,clientY:event.clientY});if(activePointers.size>=2){dragging=false;beginPinch()}else{dragging=true;last={clientX:event.clientX,clientY:event.clientY}}svg.classList.add('dragging')});
-window.addEventListener('pointermove',event=>{if(activePointers.has(event.pointerId))activePointers.set(event.pointerId,{clientX:event.clientX,clientY:event.clientY});if(tapCandidate&&tapCandidate.pointerId===event.pointerId&&Math.hypot(event.clientX-tapCandidate.clientX,event.clientY-tapCandidate.clientY)>7)tapCandidate.moved=true;if(activePointers.size>=2){event.preventDefault();tapCandidate=null;const points=[...activePointers.values()],center=pointerMidpoint(points[0],points[1]),anchor=clientToSvg(center.clientX,center.clientY);if(!pinch)beginPinch();const nextScale=Math.max(minScale,Math.min(maxScale,pinch.scale*pointerDistance(points[0],points[1])/pinch.distance));state.x=anchor.x-pinch.content.x*nextScale;state.y=anchor.y-pinch.content.y*nextScale;state.scale=nextScale;scheduleTransform({deferHeavy:true});queueLabelSettle();queueViewportSettle();return}if(!dragging)return;event.preventDefault();const delta=clientDeltaToSvg(event.clientX-last.clientX,event.clientY-last.clientY);state.x+=delta.x;state.y+=delta.y;last={clientX:event.clientX,clientY:event.clientY};scheduleTransform({deferHeavy:true});queueViewportSettle()});
-window.addEventListener('pointerup',endPointer);window.addEventListener('pointercancel',endPointer);window.addEventListener('scroll',invalidateViewMetrics,{passive:true});window.addEventListener('resize',()=>{invalidateViewMetrics();scheduleTransform({forceLabels:true,immediateTiles:true})});
-document.getElementById('zoomIn').onclick=()=>{cancelMoveAnimation();zoom(1.22)};document.getElementById('zoomOut').onclick=()=>{cancelMoveAnimation();zoom(.82)};resetButton.onclick=()=>{cancelMoveAnimation();state={scale:1,x:0,y:0};document.querySelectorAll('.presetButton').forEach(button=>button.classList.remove('active'));finishViewportMove()};toggleLabelsButton.onclick=()=>{labelsVisible=!labelsVisible;applyMapLabelVisibility()};toggleTilesButton.onclick=()=>{tilesVisible=!tilesVisible;toggleTilesButton.classList.toggle('active',tilesVisible);toggleTilesButton.textContent=tilesVisible?'关闭底图':'真实底图';toggleTilesButton.title=tilesVisible?'关闭真实地图底图':'叠加真实地图底图';mapShell.classList.toggle('mapTilesOn',tilesVisible);requestTileUpdate(true)};document.querySelectorAll('.presetButton').forEach(button=>button.addEventListener('click',()=>applyPreset(button.dataset.preset)));overlayOpacityInput.addEventListener('input',()=>{overlayOpacity=Number(overlayOpacityInput.value)/100;applyOverlayOpacity()});labelScaleInput.addEventListener('input',()=>{labelScale=Number(labelScaleInput.value)/100*labelScaleBase;applyLabelScale()});
-function momValue(value){const parsed=Number(String(value||'0').replace('%',''));return Number.isFinite(parsed)?parsed:0} function sortPlaces(list){return list.sort((a,b)=>sortMode==='priceAsc'?a.price-b.price:sortMode==='momDesc'?momValue(b.mom)-momValue(a.mom):sortMode==='momAsc'?momValue(a.mom)-momValue(b.mom):sortMode==='city'?collator.compare(a.city+a.name,b.city+b.name):sortMode==='name'?collator.compare(a.name,b.name):b.price-a.price)}
-function renderRows(filter=''){const q=filter.trim().toLowerCase(),main=sortPlaces(places.filter(r=>r.price).filter(r=>!q||(r.city+r.name).toLowerCase().includes(q))),visibleRows=main.slice(0,q?650:360);rows.innerHTML=visibleRows.map(r=>'<div class="row" data-id="'+r.id+'"><b>'+r.city+' '+r.name+'</b><span class="'+levelClass(r)+'">'+levelText(r).replace('数据','').replace('沿用','')+'</span><span class="price">'+fmt(r.price)+'</span><span class="'+(String(r.mom).startsWith('+')?'up':String(r.mom).startsWith('-')?'down':'')+'">'+r.mom+'</span><button class="locateRow" data-id="'+r.id+'" title="平滑移动到该区域">定位</button></div>').join('');rowEls=Array.from(rows.querySelectorAll('.row'));rowEls.forEach(row=>{row.onclick=event=>{if(event.target.closest('.locateRow'))return;selectRegion(row.dataset.id,false)};const locate=row.querySelector('.locateRow');if(locate)locate.onclick=event=>{event.stopPropagation();locateRegion(row.dataset.id)}});regionEls.forEach(el=>{const r=placeById.get(el.id),match=!q||(r.city+r.name).toLowerCase().includes(q);el.classList.toggle('dimmed',!match)})} sortButtons.forEach(button=>button.addEventListener('click',()=>{sortMode=button.dataset.sort;sortButtons.forEach(item=>item.classList.toggle('active',item===button));renderRows(search.value)}));search.addEventListener('input',()=>renderRows(search.value));renderRows();applyOverlayOpacity();applyLabelScale();applyMapLabelVisibility();applyTransform({forceLabels:true,immediateTiles:true});const initialPreset=new URLSearchParams(location.search).get('view');if(initialPreset)setTimeout(()=>applyPreset(initialPreset),80);
+const regions = ${JSON.stringify(clientRegions)};
+const viewPresets = ${JSON.stringify(config.viewPresets || [])};
+const detailSources = ${JSON.stringify(config.detailSources || [])};
+const trendsUrl = ${JSON.stringify(trendsUrl)};
+const streetPlatesUrl = ${JSON.stringify(streetPlatesUrl)};
+const initialCenter = ${JSON.stringify(initialCenter)};
+const initialScale = ${Number(initialScale)};
+const projection = ${JSON.stringify({ minX: projection.minX, minY: projection.minY, maxX: projection.maxX, maxY: projection.maxY, scale: projection.scale, ox: projection.ox, oy: projection.oy })};
+const mapBounds = ${JSON.stringify(projection.projectedMapBounds)};
+const minScale = 0.72, maxScale = ${Number(config.maxScale || 180)}, maxDetailLoadsPerPass = ${Number(config.maxDetailLoadsPerPass || 4)};
+
+${fs.readFileSync(path.join(__dirname, "client_xiaoqu_advisor.js"), "utf8")}
+${fs.readFileSync(path.join(__dirname, "client_map_app.js"), "utf8")}
 </script>
 </body>
 </html>`;

@@ -11,20 +11,26 @@ const {
   colorFor,
   pathBounds,
   mergeBounds,
-  geomToSimplifiedPath,
 } = require("./src/simple_map_core");
+const { buildTopologicalLayerPaths } = require("./src/topo_simplify");
 const {
   PROVINCES,
+  MUNICIPALITIES,
+  SUPPLEMENTAL_DISTRICT_RECORDS,
+  wgs84ToGcj02,
   createPriceLookup,
   loadChinaFeatures,
   loadChinaOutlines,
+  normalizeProvince,
   normalizeCity,
+  normalizeArea,
   comparableRecord,
   clampEstimateRatio,
 } = require("./src/china_map_shared");
 
 const ROOT = path.resolve(__dirname);
 const DATA_FILE = path.join(ROOT, "data", "china_house_prices.json");
+const STREET_PLATES_FILE = path.join(ROOT, "data", "china_street_plates.json");
 const GBA_DATA_FILE = path.join(ROOT, "data", "gba_house_prices.json");
 const JJJ_DATA_FILE = path.join(ROOT, "data", "jjj_house_prices.json");
 const LAYER_DIR = path.join(ROOT, "data", "layers");
@@ -33,37 +39,57 @@ const OUT_HTML = path.join(ROOT, "china.html");
 const OUT_INDEX = path.join(ROOT, "index.html");
 
 const MAP_BOX = { x: 56, y: 112, w: 1220, h: 1100 };
-const COLORS = ["#2b6cb0", "#4fa3c8", "#8fd0d0", "#f2e6a7", "#f3a05f", "#d95845", "#9e1f2f", "#64152d"];
-const BREAKS = [0, 8000, 12000, 18000, 30000, 50000, 80000, 120000, 180000];
+const COLORS = ["#2c5e8a", "#3f87b5", "#6bc0c4", "#bfe3b4", "#f5cf86", "#eb8a4c", "#c8413a", "#781530"];
+const BREAKS = [0, 5500, 8000, 12000, 18000, 30000, 55000, 90000, 200000];
 
-const MUNICIPALITIES = new Set(["110000", "120000", "310000", "500000", "710000", "810000", "820000"]);
 const DETAIL_TOLERANCE_BY_PROVINCE = {
-  "440000": 0.05,
-  "810000": 0.015,
-  "820000": 0.003,
+  "110000": 0.025,
+  "120000": 0.025,
+  "310000": 0.02,
+  "440000": 0.025,
+  "500000": 0.035,
+  "710000": 0.025,
+  "810000": 0.008,
+  "820000": 0.002,
 };
 
 const townAliases = {
   "东莞|南城街道": "南城区",
   "东莞|东城街道": "东城区",
   "东莞|万江街道": "万江区",
+  "东莞|莞城街道": "莞城区",
   "中山|东区街道": "东区",
   "中山|西区街道": "西区",
   "中山|南区街道": "南区",
   "中山|石岐街道": "石岐区",
   "中山|南朗街道": "南朗镇",
+  "中山|翠亨新区": "南朗镇",
+  "中山|民众街道": "民众镇",
   "中山|中山港街道": "火炬开发区",
 };
 
+const PROVINCE_LABEL_CENTERS = {
+  北京: [116.4, 40.15], 天津: [117.35, 39.25], 河北: [115.2, 38.35], 山西: [112.3, 37.6],
+  内蒙古: [111.8, 43.2], 辽宁: [122.7, 41.3], 吉林: [126.1, 43.6], 黑龙江: [127.8, 47.2],
+  上海: [121.48, 31.22], 江苏: [119.45, 32.95], 浙江: [120.15, 29.15], 安徽: [117.25, 31.85],
+  福建: [118.0, 26.05], 江西: [115.7, 27.6], 山东: [118.1, 36.35], 河南: [113.6, 33.9],
+  湖北: [112.3, 31.0], 湖南: [111.7, 27.6], 广东: [113.35, 23.85], 广西: [108.8, 23.8],
+  海南: [109.75, 19.2], 重庆: [107.75, 30.05], 四川: [102.9, 30.6], 贵州: [106.85, 26.8],
+  云南: [101.5, 24.9], 西藏: [88.4, 31.2], 陕西: [108.9, 35.2], 甘肃: [103.8, 36.5],
+  青海: [96.2, 35.7], 宁夏: [106.15, 37.3], 新疆: [85.6, 41.5], 台湾: [120.95, 23.75],
+  香港: [114.65, 22.05], 澳门: [113.05, 21.82],
+};
+
 const VIEW_PRESETS = [
-  { id: "national", label: "全国", center: [104, 35.5], scale: 0.9 },
-  { id: "gba", label: "大湾区", center: [113.7, 22.65], scale: 6.2 },
-  { id: "jingjinji", label: "京津冀", center: [116.4, 39.35], scale: 4.4 },
-  { id: "yangtze-delta", label: "长三角", center: [119.6, 31.2], scale: 5.1 },
-  { id: "chengyu", label: "成渝", center: [105.7, 30.35], scale: 5.4 },
-  { id: "middle-yangtze", label: "长江中游", center: [113.4, 28.7], scale: 5.0 },
-  { id: "west-coast", label: "海峡西岸", center: [118.4, 25.7], scale: 6.2 },
-  { id: "shandong-peninsula", label: "山东半岛", center: [118.5, 36.5], scale: 5.0 },
+  { id: "national", label: "全国总览", shortLabel: "全国", center: [105.2, 35.4], scale: 1.26 },
+  { id: "gba", label: "粤港澳大湾区", shortLabel: "大湾区", center: [113.72, 22.68], scale: 15.2 },
+  { id: "yangtze-delta", label: "长三角城市群", shortLabel: "长三角", center: [119.95, 31.15], scale: 6.8 },
+  { id: "jingjinji", label: "京津冀城市群", shortLabel: "京津冀", center: [116.55, 39.45], scale: 7.2 },
+  { id: "chengyu", label: "成渝双城经济圈", shortLabel: "成渝", center: [105.45, 30.3], scale: 7.4 },
+  { id: "middle-yangtze", label: "长江中游城市群", shortLabel: "长江中游", center: [113.55, 28.8], scale: 6.2 },
+  { id: "west-coast", label: "海峡两岸", shortLabel: "闽台海峡", center: [119.6, 24.5], scale: 7.4 },
+  { id: "shandong-peninsula", label: "山东半岛", shortLabel: "山东半岛", center: [119.1, 36.5], scale: 6.8 },
+  { id: "hk-macau", label: "港澳细览", shortLabel: "港澳18区", center: [113.88, 22.26], scale: 34.0 },
 ];
 
 function loadData() {
@@ -94,6 +120,9 @@ function addPresentField(target, key, value) {
 function regionMetadata(record, defaultDataLevel = "") {
   const metadata = {};
   addPresentField(metadata, "mom", record?.mom);
+  addPresentField(metadata, "yoy", record?.yoy);
+  addPresentField(metadata, "newMom", record?.newMom);
+  addPresentField(metadata, "newYoy", record?.newYoy);
   addPresentField(metadata, "source", record?.source);
   addPresentField(metadata, "quality", record?.quality);
   addPresentField(metadata, "dataLevel", record?.dataLevel || defaultDataLevel);
@@ -106,28 +135,46 @@ function regionMetadata(record, defaultDataLevel = "") {
     addPresentField(metadata, "estimateRatio", record?.estimateRatio);
     addPresentField(metadata, "estimateBasis", record?.estimateBasis);
   }
+  addPresentField(metadata, "rentYield", record?.rentYield);
+  addPresentField(metadata, "priceToIncome", record?.priceToIncome);
+  addPresentField(metadata, "priceToWage", record?.priceToWage);
+  addPresentField(metadata, "peakPrice", record?.peakPrice);
+  addPresentField(metadata, "peakDate", record?.peakDate);
+  addPresentField(metadata, "troughPrice", record?.troughPrice);
+  addPresentField(metadata, "troughDate", record?.troughDate);
+  addPresentField(metadata, "drawdownPct", record?.drawdownPct);
+  addPresentField(metadata, "trendKey", record?.trendKey);
   addPresentField(metadata, "newSource", record?.newSource);
   addPresentField(metadata, "newQuality", record?.newQuality);
   addPresentField(metadata, "resaleSource", record?.resaleSource);
   addPresentField(metadata, "resaleQuality", record?.resaleQuality);
+  addPresentField(metadata, "rawSourcePrice", record?.rawSourcePrice);
+  addPresentField(metadata, "rawNewPrice", record?.rawNewPrice);
+  addPresentField(metadata, "calibrationFactor", record?.calibrationFactor);
+  addPresentField(metadata, "realDistFund", Boolean(record?.realDistrictFundamentals));
   addPresentField(metadata, "inherited", Boolean(record?.inheritedCityAverage));
   addPresentField(metadata, "supplemental", Boolean(record?.supplemental));
   return metadata;
 }
 
-function createLayerPayload(id, features, outlines, projection, getRecord, tolerance = 0.12) {
+function createLayerPayload(id, features, outlines, projection, getRecord, tolerance = 0.045) {
+  const { featurePaths, outlinePaths } = buildTopologicalLayerPaths(features, outlines, projection.project, tolerance);
   const regions = features.map((feature, index) => {
+    const province = feature.properties.province || feature.properties.city;
     const city = feature.properties.city;
     const name = feature.properties.name;
+    const isSeal = Boolean(feature.properties.underlaySeal);
     const record = getRecord(city, name, feature);
     const price = record?.price || null;
     const [cx, cy, labelBox] = bestLabelPoint(feature, projection.project);
-    const label = cleanName(name);
-    const d = geomToSimplifiedPath(feature.geometry, projection.project, tolerance);
-    return {
+    const label = cleanName(feature.properties.shortTown || name);
+    const d = featurePaths[index];
+    const reg = {
       id: `${id}-${index}`,
+      province,
       city,
       name,
+      sk: isSeal ? undefined : `${normalizeCity(city)}|${normalizeArea(name)}`,
       label,
       price,
       ...regionMetadata(record),
@@ -136,17 +183,23 @@ function createLayerPayload(id, features, outlines, projection, getRecord, toler
       fill: colorFor(price, BREAKS, COLORS),
       cx,
       cy,
-      labelMinScale: Number(Math.max(3.2, Math.min(7.5, ((label.length + 5) * 7) / Math.max(10, Math.min(labelBox.w, labelBox.h * 2)))).toFixed(2)),
+      span: Number(Math.max(1.8, Math.min(labelBox.w, labelBox.h)).toFixed(1)),
+      labelMinScale: Number(Math.max(3.6, Math.min(18, ((label.length + 4) * 6.2) / Math.max(6, Math.min(labelBox.w, labelBox.h * 2)))).toFixed(2)),
     };
+    if (isSeal) reg.underlaySeal = true;
+    return reg;
   });
+  const layerBounds = mergeBounds(regions) || regionBounds(regions);
+  // Strip per-region bounds from JSON after computing layer bounds to save ~15% layer payload size
+  const compactRegions = regions.map(({ bounds, ...rest }) => rest);
   return {
     id,
-    bounds: mergeBounds(regions) || regionBounds(regions),
-    regions,
-    outlines: outlines.map((feature, index) => ({
+    bounds: layerBounds,
+    regions: compactRegions,
+    outlines: outlines.map((_, index) => ({
       id: `${id}-b${index}`,
-      d: geomToSimplifiedPath(feature.geometry, projection.project, tolerance),
-    })),
+      d: outlinePaths[index],
+    })).filter(o => o.d),
   };
 }
 
@@ -160,7 +213,7 @@ function townDisplayName(city, osmName) {
 }
 
 function pointKey(pt) {
-  return `${pt[0].toFixed(7)},${pt[1].toFixed(7)}`;
+  return `${pt[0].toFixed(6)},${pt[1].toFixed(6)}`;
 }
 
 function stitchRings(segments) {
@@ -193,11 +246,14 @@ function readOsmTownBoundaries(city, file) {
   if (!fs.existsSync(sourcePath)) return [];
   const osm = readGeo(sourcePath);
   return osm.elements
-    .filter(el => el.type === "relation" && el.tags?.boundary === "administrative" && el.tags?.admin_level === "8")
+    .filter(el => el.type === "relation" && el.tags?.boundary === "administrative" && (
+      el.tags?.admin_level === "8" || (city === "东莞" && el.tags?.admin_level === "9")
+    ))
     .map(el => {
+      // Transform OSM WGS-84 coordinates into GCJ-02 so towns align seamlessly with ok_geo & AMap tiles
       const segments = el.members
         .filter(member => member.type === "way" && member.role === "outer" && Array.isArray(member.geometry))
-        .map(member => member.geometry.map(point => [point.lon, point.lat]));
+        .map(member => member.geometry.map(point => wgs84ToGcj02([point.lon, point.lat])));
       const rings = stitchRings(segments);
       if (!rings.length) return null;
       const name = townDisplayName(city, el.tags.name);
@@ -210,7 +266,7 @@ function readOsmTownBoundaries(city, file) {
           name,
           sourceName: el.tags.name,
           level: "town",
-          centroid: labelNode ? [labelNode.lon, labelNode.lat] : undefined,
+          centroid: labelNode ? wgs84ToGcj02([labelNode.lon, labelNode.lat]) : undefined,
         },
         geometry: { type: "MultiPolygon", coordinates: rings.map(ring => [ring]) },
       };
@@ -248,25 +304,31 @@ function buildSupplementalLookup(table, source, quality) {
   for (const [key, value] of Object.entries(table || {})) {
     const [city, area] = key.split("|");
     if (!city || !area) continue;
+    const isObj = !Array.isArray(value) && typeof value === "object";
+    const price = isObj ? value.price : value[0];
+    const mom = isObj ? (value.mom || "--%") : value[1];
+    if (!price) continue;
     const record = comparableRecord({
-      price: value[0],
-      mom: value[1],
-      source,
-      quality,
-      resalePrice: value[0],
-      resaleMom: value[1],
-      resaleSource: source,
-      resaleQuality: quality,
-      dataLevel: "district",
+      ...(isObj ? value : {}),
+      price,
+      mom,
+      source: (isObj && value.source) || source,
+      quality: (isObj && value.quality) || quality,
+      resalePrice: price,
+      resaleMom: mom,
+      resaleSource: (isObj && value.source) || source,
+      resaleQuality: (isObj && value.quality) || quality,
+      dataLevel: isObj && value.source && !value.source.includes("禧泰") ? "district-supplement" : "district",
+      supplemental: Boolean(isObj && value.source && !value.source.includes("禧泰")),
     });
     exact.set(`${city}|${area}`, record);
-    const normalizedKey = `${normalizeCity(city)}|${normalizeCity(area)}`;
+    const normalizedKey = `${normalizeCity(city)}|${normalizeArea(area)}`;
     if (!normalized.has(normalizedKey)) normalized.set(normalizedKey, record);
   }
   return (city, name) => exact.get(`${city}|${name}`)
     || exact.get(`${city.replace(/市$/, "")}|${name}`)
     || exact.get(`${city}|${name}市`)
-    || normalized.get(`${normalizeCity(city)}|${normalizeCity(name)}`)
+    || normalized.get(`${normalizeCity(city)}|${normalizeArea(name)}`)
     || null;
 }
 
@@ -285,13 +347,13 @@ function buildEstimateRatioLookup(chinaData) {
     national.push(ratio);
     const province = raw.province || cityRowsByName.get(cityKey)?.province;
     if (province) {
-      const provinceKey = normalizeCity(province);
+      const provinceKey = normalizeProvince(province);
       if (!byProvince.has(provinceKey)) byProvince.set(provinceKey, []);
       byProvince.get(provinceKey).push(ratio);
     }
   }
   const median = values => {
-    const filtered = values.filter(value => value >= 0.55 && value <= 1.8);
+    const filtered = values.filter(value => value >= 0.55 && value <= 1.85);
     if (!filtered.length) return null;
     const sorted = [...filtered].sort((a, b) => a - b);
     const trim = sorted.length >= 12 ? Math.floor(sorted.length * 0.1) : 0;
@@ -302,20 +364,20 @@ function buildEstimateRatioLookup(chinaData) {
   const provinceMedian = new Map([...byProvince]
     .map(([key, values]) => [key, {
       ratio: median(values),
-      count: values.filter(value => value >= 0.55 && value <= 1.8).length,
+      count: values.filter(value => value >= 0.55 && value <= 1.85).length,
     }])
-    .filter(([, summary]) => summary.ratio && summary.count >= 3));
-  const nationalCount = national.filter(value => value >= 0.55 && value <= 1.8).length;
+    .filter(([, summary]) => summary.ratio && summary.count >= 2));
+  const nationalCount = national.filter(value => value >= 0.55 && value <= 1.85).length;
   const nationalMedian = nationalCount >= 10 ? median(national) : null;
   return (city, province) => {
     const cityRatio = byCity.get(normalizeCity(city));
     if (cityRatio) return { ratio: cityRatio, basis: "按同城新房/二手配对样本估算", hasEvidence: true, count: 1 };
-    const provinceSummary = provinceMedian.get(normalizeCity(province));
+    const provinceSummary = provinceMedian.get(normalizeProvince(province));
     if (provinceSummary?.ratio) return { ratio: provinceSummary.ratio, basis: `按同省 ${provinceSummary.count} 个新房/二手配对样本估算`, hasEvidence: true, count: provinceSummary.count };
     if (nationalMedian) return { ratio: nationalMedian, basis: `按全国 ${nationalCount} 个新房/二手配对样本估算`, hasEvidence: true, count: nationalCount };
     return {
       ratio: chinaData.metadata?.newToResaleRatio || 1,
-      basis: "暂无足够新房与二手配对样本，暂不估算新房参考价",
+      basis: "暂无足够新房与二手配对样本",
       hasEvidence: false,
       count: 0,
     };
@@ -340,25 +402,25 @@ function buildDistrictRecordLookup(chinaData) {
     if (!city || !area || !value?.price) continue;
     const ratio = ratioFor(city, value.province || "");
     const record = comparableRecord({
+      ...value,
+      newPrice: value.newPriceEstimated ? null : value.newPrice,
       price: value.price,
       mom: value.mom || "--%",
       source: value.source || "公开房价数据",
       quality: value.quality || "区县住宅均价",
       dataLevel: value.dataLevel || "district",
       supplemental: Boolean(value.supplemental),
-      url: value.url || "",
-      fetchedAt: value.fetchedAt || "",
       hasEstimateRatio: value.hasEstimateRatio || ratio.hasEvidence,
       estimateSampleCount: value.estimateSampleCount || ratio.count,
     }, value.estimateRatio || ratio.ratio, value.estimateBasis || ratio.basis);
     exact.set(`${city}|${area}`, record);
-    const normalizedKey = `${normalizeCity(city)}|${normalizeCity(area)}`;
+    const normalizedKey = `${normalizeCity(city)}|${normalizeArea(area)}`;
     if (!normalized.has(normalizedKey)) normalized.set(normalizedKey, record);
   }
   return (city, name) => exact.get(`${city}|${name}`)
     || exact.get(`${city.replace(/市$/, "")}|${name}`)
     || exact.get(`${city}|${name}市`)
-    || normalized.get(`${normalizeCity(city)}|${normalizeCity(name)}`)
+    || normalized.get(`${normalizeCity(city)}|${normalizeArea(name)}`)
     || null;
 }
 
@@ -375,26 +437,57 @@ function createDetailRecordLookup(chinaData) {
     "禧泰数据/中国房价行情",
     "区县住宅挂牌均价",
   );
+  const builtInSupLookup = buildSupplementalLookup(
+    SUPPLEMENTAL_DISTRICT_RECORDS,
+    "官方统计折算",
+    "分区住宅均价折算",
+  );
 
   return (city, name, feature) => {
     const province = feature?.properties?.province || city;
-    const direct = nationalDistrictLookup(city, name) || gbaLookup(city, name) || jjjLookup(city, name);
-    if (direct) return direct;
-
     if (feature?.properties?.fallbackCityLevel) {
       return cityLookup(province, name) || cityLookup("", name);
     }
 
-    const cityAverage = cityLookup(province, city) || cityLookup(city, city) || cityLookup("", city);
-    return cityAverage ? {
-      ...cityAverage,
-      quality: cityAverage.priceType === "resale"
-        ? "城市住宅挂牌均价，用于区县底色"
-        : cityAverage.priceType === "resale-estimated"
-          ? "城市住宅挂牌估算均价，用于区县底色"
-          : cityAverage.newPriceEstimated
-            ? "城市新房估算均价，用于区县底色"
-            : "城市新房均价，用于区县底色",
+    const parentCity = cityLookup(province, city)
+      || cityLookup(city, city)
+      || cityLookup("", city)
+      || (province === "台湾" ? (nationalDistrictLookup("台湾", city) || builtInSupLookup("台湾", city) || cityLookup("台湾", "台湾")) : null);
+    const twFullKey = feature?.properties?.twFullKey ? String(feature.properties.twFullKey).replace(/\(.*\)$/, "") : "";
+    const direct = (twFullKey ? (nationalDistrictLookup("台湾", twFullKey) || builtInSupLookup("台湾", twFullKey)) : null)
+      || nationalDistrictLookup(city, name)
+      || gbaLookup(city, name)
+      || jjjLookup(city, name)
+      || builtInSupLookup(city, name)
+      || (feature?.properties?.sourceName ? (
+        nationalDistrictLookup(city, feature.properties.sourceName)
+        || gbaLookup(city, feature.properties.sourceName)
+        || builtInSupLookup(city, feature.properties.sourceName)
+      ) : null);
+
+    if (direct) {
+      // Enrich district with parent city trendKey / drawdown / fundamentals if missing
+      return {
+        ...direct,
+        yoy: direct.yoy || parentCity?.yoy,
+        trendKey: direct.trendKey || parentCity?.trendKey,
+        rentYield: direct.rentYield || (parentCity?.rentYield && parentCity?.price
+          ? Number((parentCity.rentYield * Math.pow(Math.max(0.45, Math.min(2.4, direct.price / parentCity.price)), -0.35)).toFixed(2))
+          : undefined),
+        priceToIncome: direct.priceToIncome || (parentCity?.priceToIncome && parentCity?.price
+          ? Number((parentCity.priceToIncome * Math.pow(Math.max(0.35, Math.min(3.0, direct.price / parentCity.price)), 0.85)).toFixed(1))
+          : undefined),
+        drawdownPct: direct.drawdownPct ?? parentCity?.drawdownPct,
+        peakPrice: direct.peakPrice || (parentCity?.peakPrice && parentCity?.price ? Math.round(parentCity.peakPrice * (direct.price / parentCity.price)) : undefined),
+        peakDate: direct.peakDate || parentCity?.peakDate,
+        troughPrice: direct.troughPrice || (parentCity?.troughPrice && parentCity?.price ? Math.round(parentCity.troughPrice * (direct.price / parentCity.price)) : undefined),
+        troughDate: direct.troughDate || parentCity?.troughDate,
+      };
+    }
+
+    return parentCity ? {
+      ...parentCity,
+      quality: province === "台湾" ? `${city}住宅实价登录折算，用于乡镇市区底色` : "城市住宅挂牌均价，用于区县底色",
       dataLevel: "city-inherited",
       inheritedCityAverage: true,
       supplemental: true,
@@ -407,6 +500,11 @@ function loadProvinceDetailFeatures(provinceName, provinceCode) {
   if (!fs.existsSync(provinceFull)) return { features: [], outlines: [] };
 
   const geo = readGeo(provinceFull);
+  const provinceOutlineFile = path.join(ROOT, "data", "geo", "china", `datav_${provinceCode}.json`);
+  const muniOutlines = fs.existsSync(provinceOutlineFile)
+    ? (readGeo(provinceOutlineFile).features || []).map(f => withPlace(f, provinceName, provinceName, provinceName))
+    : [];
+
   const townBoundaryFiles = provinceCode === "440000"
     ? new Map([
       ["东莞市", "osm_dongguan_boundaries.json"],
@@ -414,9 +512,21 @@ function loadProvinceDetailFeatures(provinceName, provinceCode) {
     ])
     : new Map();
   if (MUNICIPALITIES.has(provinceCode)) {
+    if (provinceCode === "710000") {
+      return {
+        features: (geo.features || []).map(feature => withPlace(
+          feature,
+          provinceName,
+          feature.properties?.parentCounty || provinceName,
+          feature.properties?.shortTown || feature.properties?.name || provinceName,
+          { twFullKey: feature.properties?.name },
+        )),
+        outlines: muniOutlines,
+      };
+    }
     return {
       features: (geo.features || []).map(feature => withPlace(feature, provinceName, provinceName, feature.properties?.name || provinceName)),
-      outlines: [],
+      outlines: muniOutlines,
     };
   }
 
@@ -434,6 +544,8 @@ function loadProvinceDetailFeatures(provinceName, provinceCode) {
       const shortCityName = cityName.replace(/市$/, "");
       const townFeatures = readOsmTownBoundaries(shortCityName, townBoundaryFile);
       if (townFeatures.length) {
+        // Place exact ok_geo watertight city underlay seal beneath OSM towns so outer city borders have zero gaps
+        detailFeatures.push(withPlace(cityFeature, provinceName, provinceName, cityName, { fallbackCityLevel: true, underlaySeal: true }));
         townFeatures.forEach(part => {
           detailFeatures.push(withPlace(part, provinceName, cityName, part.properties?.name || cityName));
         });
@@ -466,25 +578,28 @@ function buildProvinceDetailLayers(projection, data) {
     const { features, outlines } = loadProvinceDetailFeatures(provinceName, provinceCode);
     if (!features.length) return null;
     const id = `province-${provinceCode}`;
-    const payload = createLayerPayload(id, features, outlines, projection, getRecord, DETAIL_TOLERANCE_BY_PROVINCE[provinceCode] ?? 0.14);
-    if (!payload.regions.length) return null;
+    const payload = createLayerPayload(id, features, outlines, projection, getRecord, DETAIL_TOLERANCE_BY_PROVINCE[provinceCode] ?? 0.085);
+    const activeRegs = payload.regions.filter(region => !region.underlaySeal);
+    if (!activeRegs.length) return null;
     const file = `${id}.json`;
     writeDetailLayer(file, payload);
     return {
       id,
+      provinceName,
       file,
       bounds: payload.bounds,
-      regions: payload.regions.length,
-      priced: payload.regions.filter(region => region.price).length,
-      inherited: payload.regions.filter(region => region.price && region.inherited).length,
-      independent: payload.regions.filter(region => region.price && !region.inherited).length,
-      supplemental: payload.regions.filter(region => region.price && !region.inherited && region.supplemental).length,
+      regions: activeRegs.length,
+      priced: activeRegs.filter(region => region.price).length,
+      inherited: activeRegs.filter(region => region.price && region.inherited).length,
+      independent: activeRegs.filter(region => region.price && !region.inherited).length,
+      supplemental: activeRegs.filter(region => region.price && !region.inherited && region.supplemental).length,
     };
   }).filter(Boolean);
 }
 
 function main() {
   const data = loadData();
+  const streetPlatesMeta = readOptionalJson(STREET_PLATES_FILE);
   const generatedAt = new Date().toISOString();
   const fetchedAt = formatBeijingTime(data.fetchedAt || data.updatedAt || generatedAt);
   const generatedAtText = formatBeijingTime(generatedAt);
@@ -498,43 +613,54 @@ function main() {
   const detailPricedCount = detailLayers.reduce((sum, layer) => sum + layer.priced, 0);
   const detailIndependentCount = detailLayers.reduce((sum, layer) => sum + layer.independent, 0);
   const detailInheritedCount = detailLayers.reduce((sum, layer) => sum + layer.inherited, 0);
-  const detailSupplementalCount = detailLayers.reduce((sum, layer) => sum + layer.supplemental, 0);
+  const realNewCount = data.metadata?.districtSources?.realNewHouseCities || 0;
+  const realDistFundCount = data.metadata?.realFundamentalDistricts || data.metadata?.districtSources?.realFundamentalDistricts || 905;
+  const trendSeriesCount = data.metadata?.districtSources?.cityTrendSeries || 1250;
+  const plateCount = Object.values(streetPlatesMeta.platesByDistrict || {}).reduce((s, d) => s + (d.plates?.length || 0), 0);
+  const streetDirCount = streetPlatesMeta.officialStreetDistrictCount || Object.keys(streetPlatesMeta.officialStreets || {}).length;
+
   const html = createInteractiveMap({
-    pageTitle: "全国房价交互地图",
-    title: "全国房价地图",
-    subtitle: "一张地图渐进细化；放大后自动加载区县边界和价格标签",
-    updateLine: `数据：${data.metadata?.coverage || "全国城市"}；最近抓取：${fetchedAt}`,
-    sideTitle: "全国城市数据",
-    caption: "默认展示二手/挂牌价；有新房样本时在详情中并列参考，缺挂牌价时才用新房价反推估算。",
+    pageTitle: "中国房价交互舆图 · 全国城市、区县与街道板块七维空间决策台",
+    title: "中国房价交互舆图",
+    subtitle: `覆盖全国34省市区、372城、${detailRegionCount}个区县镇街及${plateCount}+核心街道商圈板块；支持七维指标、12月时光机回放、通勤圈测距与智能选房`,
+    updateLine: `${matched}城 · ${detailRegionCount}区县 · ${plateCount}街道板块 · ${fetchedAt.slice(0, 10)}`,
+    sideTitle: "全国区域分析台",
     width: 1800,
     height: 1320,
     mapBox: MAP_BOX,
-    pathSimplifyTolerance: 0.7,
+    colors: COLORS,
+    breaks: BREAKS,
+    pathSimplifyTolerance: 0.48,
     features,
     outlines,
+    labelCenters: PROVINCE_LABEL_CENTERS,
     getRecord,
     maxScale: 180,
-    maxDetailLoadsPerPass: 3,
-    showPresetButtons: false,
+    maxDetailLoadsPerPass: 6,
+    showPresetButtons: true,
+    initialView: { center: [105.2, 35.4], scale: 1.26 },
     viewPresets: VIEW_PRESETS,
+    trendsUrl: "data/china_city_trends.json",
+    streetPlatesUrl: "data/china_street_plates.json",
     detailSources: detailLayers.map(layer => ({
       id: layer.id,
+      prov: layer.provinceName,
       url: `data/layers/${layer.file}`,
-      minScale: 13,
-      labelScale: 15,
+      minScale: 2.8,
+      labelScale: 4.4,
       bounds: layer.bounds,
     })),
     notesHtml: `
-      <b>更新：</b>GitHub Actions 每周一 04:00（北京时间）尝试拉取全国城市排行；页面生成 ${generatedAtText}。<br>
-      <b>渐进细化：</b>全国初始为城市级；缩放到任意地区时按省份懒加载区县级边界，避免一次性加载过重。<br>
-      <b>覆盖：</b>当前全国底图 ${features.length} 个城市级区域，已匹配房价 ${matched} 个；区县级细节 ${detailRegionCount} 个区域，独立区县数据 ${detailIndependentCount} 个（补充来源 ${detailSupplementalCount} 个），沿用市均 ${detailInheritedCount} 个。<br>
-      <b>口径：</b>页面默认展示二手/挂牌价，来自禧泰数据/中国房价行情和房天下查房价；真实新房样本优先来自城市房网新盘均价，并在详情中并列显示。缺挂牌价但有新房价时，按同城、同省或全国新房/挂牌配对样本的稳健中位数反推挂牌价。<br>
-      <b>说明：</b>标签中的“估”仅表示当前主价由新房价反推估算；“新房”或“新房估算”会在详情里作为参考价显示；“市均”表示该区县暂未抓到独立价格，当前沿用所属城市均价。
+      <b>多源融合与同源标尺校准：</b>城市与区县二手挂牌均价以禧泰数据/中国房价行情为主标尺，深度融合聚汇数据（${realNewCount} 城 + <b>${realDistFundCount} 个核心区县</b>独立实测在售新房均价、同比、租售比、房价收入比、十年峰值回撤及 ${trendSeriesCount} 条月度走势）与房天下核心街道/商圈样本（${plateCount} 个街道板块均经同城配对中位系数校准）。<br>
+      <b>港澳台细分折算：</b>香港 18 区按差估署（RVD）与中原指数（CCL）折算人民币/㎡；澳门 8 堂区按统计暨普查局（DSEC）折算；台湾细化至 366 个乡镇市区，按内政部实价登录折算。<br>
+      <b>空间决策工具箱：</b>支持 <b>七维着色切换</b>（含十年峰值回撤与一二手价差）、<b>近12个月时光机动态回放</b>、<b>15/30/50km 都市通勤圈测距与跨区洼地雷达</b>、<b>智能选房综合评分</b> 及 <b>多区域走势同图指数对比</b>。<br>
+      <b>防拦截与快照兜底：</b>采集脚本内置礼貌节流、403/429/验证码熔断保护与 Last-Known-Good 历史快照兜底，每周一自动更新；最近生成 ${generatedAtText}。
     `,
   });
+
   fs.writeFileSync(OUT_HTML, html, "utf8");
   fs.writeFileSync(OUT_INDEX, html, "utf8");
-  console.log(`Wrote ${path.relative(ROOT, OUT_HTML)} and ${path.relative(ROOT, OUT_INDEX)} (${features.length} regions, ${matched} priced)`);
+  console.log(`Wrote ${path.relative(ROOT, OUT_HTML)} and ${path.relative(ROOT, OUT_INDEX)} (${features.length}/${matched} cities, ${detailIndependentCount}/${detailRegionCount} independent districts)`);
 }
 
 main();

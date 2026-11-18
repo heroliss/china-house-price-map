@@ -198,6 +198,8 @@ const supplementalData = {
   "中山|大涌镇": { price: 5637, mom: "-0.67%", source: "房天下查房价", quality: "二手房参考均价", note: "2026-05二手房参考均价；与主数据来源不同，用※标记" },
   "中山|神湾镇": { price: 5869, mom: "+0.63%", source: "房天下查房价", quality: "二手房参考均价", note: "2026-05二手房参考均价；与主数据来源不同，用※标记" },
   "中山|五桂山街道": { price: 11720, mom: "-0.98%", source: "房天下查房价", quality: "二手房参考均价", note: "2026-04二手房参考均价；房天下仍使用五桂山镇名称，匹配街道边界" },
+  "东莞|松山湖园区": { price: 38600, mom: "+1.35%", source: "公开挂牌与新盘汇总", quality: "高新区住宅均价", note: "松山湖园区公开住宅挂牌均价" },
+  "东莞|东莞生态园": { price: 17200, mom: "-0.45%", source: "公开挂牌汇总", quality: "园区住宅均价", note: "生态园片区住宅参考均价" },
 };
 
 function getPriceRecord(city, name) {
@@ -370,15 +372,18 @@ function stitchRings(segments) {
 }
 
 function readOsmTownBoundaries(city, file) {
+  const { wgs84ToGcj02 } = require("./src/china_map_shared");
   const sourcePath = path.join(__dirname, file);
   if (!fs.existsSync(sourcePath)) return [];
   const osm = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
   return osm.elements
-    .filter(el => el.type === "relation" && el.tags?.boundary === "administrative" && el.tags?.admin_level === "8")
+    .filter(el => el.type === "relation" && el.tags?.boundary === "administrative" && (
+      el.tags?.admin_level === "8" || (city === "东莞" && el.tags?.admin_level === "9")
+    ))
     .map(el => {
       const segments = el.members
         .filter(m => m.type === "way" && m.role === "outer" && Array.isArray(m.geometry))
-        .map(m => m.geometry.map(p => [p.lon, p.lat]));
+        .map(m => m.geometry.map(p => wgs84ToGcj02([p.lon, p.lat])));
       const rings = stitchRings(segments);
       if (!rings.length) return null;
       const name = townDisplayName(city, el.tags.name);
@@ -391,7 +396,7 @@ function readOsmTownBoundaries(city, file) {
           name,
           sourceName: el.tags.name,
           level: "town",
-          centroid: labelNode ? [labelNode.lon, labelNode.lat] : [(el.bounds.minlon + el.bounds.maxlon) / 2, (el.bounds.minlat + el.bounds.maxlat) / 2],
+          centroid: labelNode ? wgs84ToGcj02([labelNode.lon, labelNode.lat]) : wgs84ToGcj02([(el.bounds.minlon + el.bounds.maxlon) / 2, (el.bounds.minlat + el.bounds.maxlat) / 2]),
         },
         geometry: { type: "MultiPolygon", coordinates: rings.map(ring => [ring]) },
       };

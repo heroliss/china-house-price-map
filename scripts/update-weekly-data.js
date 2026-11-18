@@ -163,8 +163,8 @@ async function refreshPrices() {
       source: "禧泰数据/中国房价行情",
       mainlandPeriod,
       fetchedAt,
-      hkPeriod: "2026/05/08公开最新",
-      macauPeriod: "2026年第一季",
+      hkPeriod: "2026/11 RVD+CCL最新",
+      macauPeriod: "2026年第三季",
       updateCadence: "weekly",
       sourceUrls: CITY_PAGES.map(item => item.url),
     },
@@ -180,7 +180,9 @@ async function refreshPrices() {
 
 async function main() {
   const shouldGenerate = process.argv.includes("--generate");
-  await refreshGeoFiles();
+  const skipGeo = process.argv.includes("--skip-geo");
+  const skipChina = process.argv.includes("--skip-china");
+  if (!skipGeo) await refreshGeoFiles();
   await refreshPrices();
 
   const jjjResult = spawnSync(process.execPath, [path.join(ROOT, "scripts", "update-jjj-data.js")], {
@@ -189,11 +191,13 @@ async function main() {
   });
   if (jjjResult.status !== 0) process.exit(jjjResult.status || 1);
 
-  const chinaResult = spawnSync(process.execPath, [path.join(ROOT, "scripts", "update-china-data.js")], {
-    cwd: ROOT,
-    stdio: "inherit",
-  });
-  if (chinaResult.status !== 0) process.exit(chinaResult.status || 1);
+  if (!skipChina) {
+    const chinaResult = spawnSync(process.execPath, [path.join(ROOT, "scripts", "update-china-data.js")], {
+      cwd: ROOT,
+      stdio: "inherit",
+    });
+    if (chinaResult.status !== 0) process.exit(chinaResult.status || 1);
+  }
 
   if (shouldGenerate) {
     const geoResult = spawnSync(process.execPath, [path.join(ROOT, "scripts", "update-china-geo.js")], {
